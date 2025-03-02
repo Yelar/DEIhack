@@ -1,0 +1,11 @@
+{
+    "manifest_version": 3,
+    "name": "DEI Hackathon",
+    "version": "1.0",
+    "description": "Help DEI people to get the best out of their voice",
+    "permissions": ["storage"],
+    "action": {
+      "default_popup": "popup.html"
+    }
+  }
+  

@@ -1,0 +1,61 @@
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Dependencies
+node_modules/
+/vendor/
+package-lock.json
+yarn.lock
+venv
+
+# Build outputs
+/dist/
+/build/
+/.next/
+/out/
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+/coverage/
+.nyc_output/
+
+# Temporary files
+*.log
+*.tmp
+.temp/
+.cache/
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional: production build files
+/public/dist/
+/public/build/
+
+# Chrome Extension specific
+*.pem
+*.crx
+*.zip 
