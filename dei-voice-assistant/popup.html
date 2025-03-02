@@ -1,135 +1,135 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Voice Recorder</title>
-  <style>
-    /* Fixed dimensions for the popup */
-    body {
-      margin: 0;
-      padding: 20px;
-      background: #121212;
-      color: #ffffff;
-      font-family: 'Helvetica Neue', sans-serif;
-      width: 350px;
-      height: 500px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      box-sizing: border-box;
-      overflow: hidden;
-    }
-
-    h3 {
-      margin-bottom: 20px;
-      font-weight: 500;
-    }
-
-    /* Container for the record button and wave animation */
-    .recorder-container {
-      position: relative;
-      width: 120px;
-      height: 120px;
-      margin-bottom: 20px;
-    }
-
-    /* Circular record button */
-    #recordBtn {
-      width: 100px;
-      height: 100px;
-      border-radius: 50%;
-      border: none;
-      background-color: #e0245e;
-      color: #ffffff;
-      font-size: 16px;
-      cursor: pointer;
-      outline: none;
-      position: relative;
-      z-index: 2;
-      transition: transform 0.2s ease;
-    }
-
-    #recordBtn:hover {
-      transform: scale(1.05);
-    }
-
-    #recordBtn.recording {
-      background-color: #1db954;
-      transform: scale(1.1);
-    }
-
-    /* Wave animation around the record button */
-    .wave {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 100px;
-      height: 100px;
-      margin-top: -50px;
-      margin-left: -50px;
-      border-radius: 50%;
-      background-color: rgba(226, 36, 94, 0.3);
-      z-index: 1;
-      animation: pulse 1.5s infinite;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .wave.active {
-      opacity: 1;
-    }
-
-    @keyframes pulse {
-      0% {
-        transform: scale(1);
-        opacity: 0.7;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Recorder</title>
+    <style>
+      /* Fixed dimensions for the popup */
+      body {
+        margin: 0;
+        padding: 20px;
+        background: #121212;
+        color: #ffffff;
+        font-family: "Helvetica Neue", sans-serif;
+        width: 350px;
+        height: 500px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        box-sizing: border-box;
+        overflow: hidden;
       }
-      100% {
-        transform: scale(2.5);
+
+      h3 {
+        margin-bottom: 20px;
+        font-weight: 500;
+      }
+
+      /* Container for the record button and wave animation */
+      .recorder-container {
+        position: relative;
+        width: 120px;
+        height: 120px;
+        margin-bottom: 20px;
+      }
+
+      /* Circular record button */
+      #recordBtn {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        border: none;
+        background-color: #e0245e;
+        color: #ffffff;
+        font-size: 16px;
+        cursor: pointer;
+        outline: none;
+        position: relative;
+        z-index: 2;
+        transition: transform 0.2s ease;
+      }
+
+      #recordBtn:hover {
+        transform: scale(1.05);
+      }
+
+      #recordBtn.recording {
+        background-color: #1db954;
+        transform: scale(1.1);
+      }
+
+      /* Wave animation around the record button */
+      .wave {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 100px;
+        height: 100px;
+        margin-top: -50px;
+        margin-left: -50px;
+        border-radius: 50%;
+        background-color: rgba(226, 36, 94, 0.3);
+        z-index: 1;
+        animation: pulse 1.5s infinite;
         opacity: 0;
+        pointer-events: none;
       }
-    }
 
-    /* Fixed status text styling */
-    #status {
-      margin-top: 10px;
-      font-weight: 500;
-    }
+      .wave.active {
+        opacity: 1;
+      }
 
-    /* Transcript area with fixed height and scroll */
-    #transcript {
-      margin-top: 10px;
-      font-size: 14px;
-      color: #cccccc;
-      text-align: center;
-      width: 100%;
-      height: 150px;
-      overflow-y: auto;
-      padding: 10px;
-      box-sizing: border-box;
-      background: #1e1e1e;
-      border-radius: 5px;
-    }
+      @keyframes pulse {
+        0% {
+          transform: scale(1);
+          opacity: 0.7;
+        }
+        100% {
+          transform: scale(2.5);
+          opacity: 0;
+        }
+      }
 
-    /* Hide audio player by default (optional display for playback) */
-    audio {
-      margin-top: 10px;
-      width: 100%;
-      display: none;
-    }
-  </style>
-</head>
-<body>
-  <h3>Voice Recorder</h3>
-  <div class="recorder-container">
-    <div id="wave" class="wave"></div>
-    <button id="recordBtn">Rec</button>
-  </div>
-  <p id="status">Click to start recording</p>
-  <audio id="audioPlayer" controls></audio>
-  <div id="transcript"></div>
-  <script src="popup.js"></script>
-</body>
+      /* Fixed status text styling */
+      #status {
+        margin-top: 10px;
+        font-weight: 500;
+      }
+
+      /* Transcript area with fixed height and scroll */
+      #transcript {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #cccccc;
+        text-align: center;
+        width: 100%;
+        height: 150px;
+        overflow-y: auto;
+        padding: 10px;
+        box-sizing: border-box;
+        background: #1e1e1e;
+        border-radius: 5px;
+      }
+
+      /* Hide audio player by default (optional display for playback) */
+      audio {
+        margin-top: 10px;
+        width: 100%;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Voice Recorder</h3>
+    <div class="recorder-container">
+      <div id="wave" class="wave"></div>
+      <button id="recordBtn">Rec</button>
+    </div>
+    <p id="status">Click to start recording</p>
+    <audio id="audioPlayer" controls></audio>
+    <div id="transcript"></div>
+    <script src="popup.js"></script>
+  </body>
 </html>
