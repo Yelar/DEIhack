@@ -10,7 +10,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let isRecording = false;
   let recognition;
   const backendUrl = "http://127.0.0.1:5000/transcript"; // Adjust if needed
+  let socket = io("http://127.0.0.1:5000/");
 
+  socket.on("connect", () => {
+    console.log("Connected to server");
+  });
+
+  socket.on("message", (data) => {
+    console.log(data);
+  });
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
