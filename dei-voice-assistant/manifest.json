@@ -3,7 +3,16 @@
   "name": "DEI Hackathon",
   "version": "1.0",
   "description": "Help DEI people to get the best out of their voice",
-  "permissions": ["scripting", "audioCapture", "activeTab", "storage"],
+  "permissions": [
+    "scripting", 
+    "activeTab", 
+    "storage", 
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:5001/*",
+    "<all_urls>"
+  ],
   "action": {
     "default_popup": "popup.html"
   },
@@ -14,6 +23,12 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["scripts/*.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {
