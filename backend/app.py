@@ -2,7 +2,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import anthropic
 from consts import prompt
+import os
+import dotenv
 
+dotenv.load_dotenv()
 
 app = Flask(__name__)
 CORS(app) 
@@ -14,7 +17,7 @@ def transcript():
     
     if not transcript_text:
         return jsonify({'error': 'No transcript provided'}), 400
-    client = anthropic.Anthropic(api_key="")
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
     response = client.messages.create(
         model="claude-3-5-sonnet-20241022", 
