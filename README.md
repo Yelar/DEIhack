@@ -23,7 +23,7 @@ A Chrome extension designed to enhance diversity, equity, and inclusion in your 
    1. Open Chrome and navigate to `chrome://extensions/`
    2. Enable "Developer mode" in the top right
    3. Click "Load unpacked" and select the `dei-voice-assistant` folder
-
+   4. Give the extension required permissions if asked
 3. **Backend Setup**
    ```bash
    cd backend
