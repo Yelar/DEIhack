@@ -31,7 +31,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["scripts/*.js"],
+      "resources": [
+        "scripts/*.js",
+        "knowledge-base.html",
+        "knowledge-base.js",
+        "images/*"
+      ],
       "matches": ["<all_urls>"]
     }
   ],

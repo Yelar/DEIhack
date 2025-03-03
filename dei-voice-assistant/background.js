@@ -148,6 +148,108 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: "received" });
   }
   
+  // Handle openKnowledgeBase message
+  else if (request.action === "openKnowledgeBase") {
+    chrome.tabs.create({
+      url: chrome.runtime.getURL("knowledge-base.html")
+    });
+  }
+  
+  // Handle knowledge base data sync request
+  else if (request.action === "requestKnowledgeBaseData") {
+    debugLog("Knowledge base data sync requested");
+    
+    // Query all tabs to find knowledge-base.html tabs
+    chrome.tabs.query({}, (tabs) => {
+      const knowledgeBaseTabs = tabs.filter(tab => 
+        tab.url && tab.url.includes('knowledge-base.html')
+      );
+      
+      if (knowledgeBaseTabs.length > 0) {
+        debugLog(`Found ${knowledgeBaseTabs.length} knowledge base tabs`);
+        
+        // Use a timeout to handle cases where the tab doesn't respond
+        let responseReceived = false;
+        const timeoutId = setTimeout(() => {
+          if (!responseReceived) {
+            debugLog("Timeout waiting for knowledge base data");
+            sendResponse({ success: false, error: "Timeout waiting for response" });
+          }
+        }, 2000);
+        
+        // Send a message to the first knowledge base tab to get the latest data
+        chrome.tabs.sendMessage(knowledgeBaseTabs[0].id, {
+          action: "getKnowledgeBaseData"
+        }, (response) => {
+          responseReceived = true;
+          clearTimeout(timeoutId);
+          
+          if (chrome.runtime.lastError) {
+            debugLog("Error getting knowledge base data:", chrome.runtime.lastError);
+            sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          
+          if (response && response.knowledgeItems) {
+            debugLog(`Received ${response.knowledgeItems.length} knowledge items`);
+            
+            // Send the data back to the requesting tab
+            try {
+              sendResponse({ 
+                success: true, 
+                knowledgeItems: response.knowledgeItems 
+              });
+            } catch (error) {
+              debugLog("Error processing knowledge base data:", error);
+              sendResponse({ success: false, error: error.message });
+            }
+          } else {
+            debugLog("No knowledge items received");
+            sendResponse({ success: false, error: "No knowledge items received" });
+          }
+        });
+        
+        // Return true to indicate we'll respond asynchronously
+        return true;
+      } else {
+        debugLog("No knowledge base tabs found");
+        sendResponse({ success: false, error: "No knowledge base tabs found" });
+      }
+    });
+    
+    // Return true to indicate we'll respond asynchronously
+    return true;
+  }
+  
+  // Handle knowledge base data update broadcast
+  else if (request.action === "knowledgeBaseUpdated") {
+    debugLog("Knowledge base data updated, broadcasting to all tabs");
+    
+    // Broadcast to all tabs except the sender
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        // Skip sender tab
+        if (sender.tab && sender.tab.id === tab.id) {
+          return;
+        }
+        
+        // Send update to each tab
+        try {
+          chrome.tabs.sendMessage(tab.id, {
+            action: "updateKnowledgeBase",
+            knowledgeItems: request.knowledgeItems
+          });
+        } catch (error) {
+          debugLog(`Error sending update to tab ${tab.id}:`, error);
+        }
+      });
+    });
+    
+    // Acknowledge receipt
+    sendResponse({ success: true });
+    return true;
+  }
+  
   // Return true to indicate we might respond asynchronously
   return true;
 });

@@ -13,6 +13,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from flask_socketio import SocketIO, send
 import json
 import openai
+import re
 
 dotenv.load_dotenv()
 
@@ -872,6 +873,300 @@ def explain():
             'status': 'error',
             'message': str(e)
         }), 500
+
+@app.route('/fill-form', methods=['POST'])
+def fill_form():
+    """
+    Process a form and user data to automatically fill form fields.
+    
+    The endpoint expects:
+    - form_data: Array of form elements with their details
+    - user_data: String containing user knowledge base information
+    
+    Returns form answers to fill the form.
+    """
+    if DEBUG:
+        app.logger.info("Processing form fill request")
+    
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
+        
+        form_data = data.get('form_data', [])
+        user_data = data.get('user_data', '')
+        print("Form data is here: ", form_data)
+        print("User data is here: ", user_data)
+        if not form_data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No form data provided'
+            }), 400
+        
+        if DEBUG:
+            app.logger.info(f"Received {len(form_data)} form elements to fill")
+        
+        # Step 1: Structure the form data using OpenAI
+        structured_form = structure_form_data(form_data)
+        
+        if not structured_form:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to structure form data'
+            }), 500
+        
+        # Step 2: Use Claude to generate answers based on the user data
+        form_answers = generate_form_answers(structured_form, user_data)
+        
+        if not form_answers:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to generate form answers'
+            }), 500
+        
+        return jsonify({
+            'status': 'success',
+            'form_answers': form_answers
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in form fill: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Error processing form: {str(e)}'
+        }), 500
+
+def structure_form_data(form_data):
+    """
+    Use Claude to structure the form data into a standardized format.
+    
+    Returns a list of structured questions with possible answers and IDs.
+    """
+    try:
+        if DEBUG:
+            app.logger.info(f"Structuring {len(form_data)} form elements with Claude")
+            app.logger.info(f"Form data preview: {json.dumps(form_data[:2])}")
+        
+        # Prepare the prompt
+        prompt = """Structure the following form elements into a standard format. 
+For each element, provide the question, possible answers, and the html_id.
+
+IMPORTANT INSTRUCTIONS:
+1. Make sure to create an entry for EVERY form element provided, don't skip any.
+2. If no possible values are provided, use common sense to suggest appropriate values.
+3. For text fields, suggest appropriate formats or examples.
+4. If the label is unclear, try to determine the likely question based on context.
+5. Use the ID or name as the html_id, keeping it exactly as provided.
+6. For elements with the same label, use the position and surrounding context to differentiate them.
+
+Form elements to structure:
+"""
+        
+        # Add form elements details with better formatting
+        for i, element in enumerate(form_data):
+            prompt += f"\n--- ELEMENT {i+1} ---\n"
+            prompt += f"Type: {element.get('type', 'text')}\n"
+            prompt += f"Label: {element.get('label', 'Unlabeled field')}\n"
+            prompt += f"ID: {element.get('id', '')}\n"
+            prompt += f"Name: {element.get('name', '')}\n"
+            prompt += f"Position: {element.get('position', i)}\n"
+            
+            # Include path and context if available
+            if element.get('positionPath'):
+                prompt += f"Position path: {element.get('positionPath')}\n"
+            
+            if element.get('surroundingContext'):
+                prompt += f"Surrounding context: {element.get('surroundingContext')}\n"
+            
+            if element.get('possibleValues') and len(element.get('possibleValues')) > 0:
+                prompt += "Possible values:\n"
+                for value in element.get('possibleValues'):
+                    prompt += f"- {value.get('text', '')} (value: {value.get('value', '')})\n"
+        
+        # Define the expected output format with more explicit instructions
+        prompt += "\n--- OUTPUT FORMAT ---\n"
+        prompt += "Respond with a JSON array of objects (one for each form element), each with the following structure:\n"
+        prompt += """
+{
+  "question": "The question or field label (make this user-friendly and clear)",
+  "possible_answers": ["array", "of", "possible", "answers", "or", "appropriate", "formats"],
+  "html_id": "The exact HTML ID or name to identify the field (use id, or if empty, use name)"
+}
+
+Make sure to:
+1. Parse ALL form elements
+2. Return an array with one entry per element
+3. Use exactly this JSON structure
+4. Include only the JSON array in your response, no other text
+5. For duplicate fields (same label), create a unique question by adding context or numbering
+"""
+        
+        # Logging the full prompt for debugging
+        if DEBUG:
+            app.logger.info(f"Generated prompt: {prompt}")
+        
+        # Call Claude API to structure the form
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        # Fix: use system as a top-level parameter
+        response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1500,
+            temperature=0.2,  # Lower temperature for more deterministic output
+            system="You are a helpful assistant that structures form data into a standard format. You always follow instructions exactly and return properly formatted JSON arrays.",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+        )
+        
+        # Extract the structured form data
+        structured_text = response.content[0].text.strip()
+        
+        # Clean the response to extract just the JSON part
+        json_match = re.search(r'\[.*\]', structured_text, re.DOTALL)
+        if json_match:
+            structured_text = json_match.group(0)
+        
+        if DEBUG:
+            app.logger.info(f"Claude response: {structured_text[:200]}...")
+        
+        # Parse the JSON response
+        try:
+            structured_data = json.loads(structured_text)
+            
+            # Additional validation
+            if isinstance(structured_data, list):
+                if DEBUG:
+                    app.logger.info(f"Successfully parsed {len(structured_data)} form elements")
+                return structured_data
+            elif isinstance(structured_data, dict) and 'form_structure' in structured_data:
+                if DEBUG:
+                    app.logger.info(f"Successfully parsed {len(structured_data['form_structure'])} form elements")
+                return structured_data['form_structure']
+            else:
+                app.logger.error(f"Unexpected structure in Claude response: {structured_data}")
+                return []
+                
+        except json.JSONDecodeError as e:
+            app.logger.error(f"Failed to parse Claude JSON response: {e}")
+            app.logger.error(f"Raw response: {structured_text}")
+            return []
+            
+    except Exception as e:
+        app.logger.error(f"Error structuring form data: {str(e)}")
+        return []
+
+def generate_form_answers(structured_form, user_data):
+    """
+    Use Claude to generate answers for the form fields based on the user's knowledge base data.
+    
+    Returns a list of answers for the form fields.
+    """
+    try:
+        if DEBUG:
+            app.logger.info(f"Generating answers for {len(structured_form)} form fields")
+            app.logger.info(f"User data length: {len(user_data)}")
+            
+        # Prepare the prompt
+        prompt = """Based on the user's personal information, generate appropriate answers for the following form fields.
+If the user data doesn't contain relevant information for a field, make a reasonable guess based on the context.
+
+USER'S PERSONAL INFORMATION:
+"""
+        prompt += user_data if user_data else "No personal information provided."
+        
+        prompt += "\n\nFORM FIELDS TO FILL:\n"
+        
+        # Add form fields
+        for i, field in enumerate(structured_form):
+            prompt += f"\n--- FIELD {i+1} ---\n"
+            prompt += f"Question: {field.get('question', 'Unlabeled field')}\n"
+            
+            if field.get('possible_answers') and len(field.get('possible_answers')) > 0:
+                prompt += "Possible answers:\n"
+                for answer in field.get('possible_answers'):
+                    prompt += f"- {answer}\n"
+            
+            prompt += f"HTML ID: {field.get('html_id', '')}\n"
+        
+        # Define the expected output format
+        prompt += """\n--- OUTPUT INSTRUCTIONS ---
+Return a JSON array with answers for each field, following this structure:
+[
+  {
+    "html_id": "The HTML ID of the field (from the input)",
+    "answer": "The appropriate answer based on user data"
+  },
+  ...
+]
+
+IMPORTANT:
+1. If a field has possible answers, choose the most appropriate one from the list.
+2. For text fields, provide a valid response based on user data or make a reasonable guess.
+3. Make sure to provide an answer for EVERY field, don't skip any.
+4. If you're unsure about a field, make your best guess based on the context.
+5. Keep your answers realistic and appropriate.
+6. Return only the JSON array, no additional text.
+"""
+        
+        if DEBUG:
+            app.logger.info(f"Generate answers prompt length: {len(prompt)}")
+        
+        # Call Claude API to generate answers
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        # Fix: use system as a top-level parameter
+        response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1500,
+            temperature=0.2,  # Lower temperature for more deterministic output
+            system="You are a helpful assistant that fills in forms based on user data. You are accurate, concise, and follow instructions precisely.",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+        )
+        
+        # Extract the generated answers
+        answer_text = response.content[0].text.strip()
+        
+        # Clean the response to extract just the JSON part
+        json_match = re.search(r'\[.*\]', answer_text, re.DOTALL)
+        if json_match:
+            answer_text = json_match.group(0)
+            
+        if DEBUG:
+            app.logger.info(f"Claude answer response: {answer_text[:200]}...")
+        
+        # Parse the JSON response
+        try:
+            answers_data = json.loads(answer_text)
+            
+            if isinstance(answers_data, list):
+                if DEBUG:
+                    app.logger.info(f"Successfully generated {len(answers_data)} answers")
+                return answers_data
+            else:
+                app.logger.error(f"Unexpected structure in Claude answer response: {answers_data}")
+                return []
+                
+        except json.JSONDecodeError as e:
+            app.logger.error(f"Failed to parse Claude JSON answer response: {e}")
+            app.logger.error(f"Raw answer response: {answer_text}")
+            return []
+            
+    except Exception as e:
+        app.logger.error(f"Error generating form answers: {str(e)}")
+        return []
 
 if __name__ == '__main__':
     print("Starting DEI Voice Assistant backend server...")

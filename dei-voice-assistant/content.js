@@ -190,6 +190,18 @@ function createExplainButton() {
       icon: '🎙️',
       tooltip: 'Voice Assistant',
       action: activateTalkMode
+    },
+    {
+      id: 'dei-knowledge-option',
+      icon: '📚',
+      tooltip: 'Knowledge Base',
+      action: activateKnowledgeMode
+    },
+    {
+      id: 'dei-form-option',
+      icon: '📋',
+      tooltip: 'Auto Form Fill',
+      action: activateFormFillMode
     }
   ];
   
@@ -381,6 +393,40 @@ function createExplainButton() {
     
     // Toggle the transcript modal
     toggleTranscriptModal();
+  }
+  
+  function activateKnowledgeMode() {
+    debugLog("Knowledge base mode activated");
+    
+    // Close the menu
+    toggleMenu();
+    
+    // Open knowledge base directly
+    openKnowledgeBase();
+  }
+  
+  function activateFormFillMode() {
+    debugLog("Form fill mode activated");
+    
+    // Close the main menu
+    toggleMenu();
+    
+    // Show form filling toast
+    showToast('Analyzing form elements...', 3000);
+    
+    // Parse the page to find form elements
+    const formElements = parseFormElements();
+    
+    if (formElements.length === 0) {
+      showToast('No form elements found on this page', 3000);
+      return;
+    }
+    
+    // Show processing toast
+    showToast(`Found ${formElements.length} form elements. Processing...`, 3000);
+    
+    // Send form elements to backend
+    sendFormDataToBackend(formElements);
   }
   
   function showPageScanAnimation(callback) {
@@ -2370,3 +2416,1885 @@ async function sendTranscript(transcript) {
     addMessageToChat('assistant', "Error processing your request. Please try again.");
   }
 }
+
+// Create the form fill submenu with two options
+function createFormFillSubmenu() {
+  debugLog("Creating form fill submenu");
+  
+  // Create submenu container
+  const submenu = document.createElement('div');
+  submenu.id = 'dei-form-submenu';
+  submenu.style.cssText = `
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 9996;
+    transition: all 0.2s ease;
+    opacity: 0;
+  `;
+  
+  // Create the two submenu buttons
+  const knowledgeButton = createSubmenuButton('dei-knowledge-button', '📚', 'Add to Knowledge Base', openKnowledgeBase);
+  const fillFormButton = createSubmenuButton('dei-fill-form-button', '✍️', 'Fill Form', fillFormAction);
+  
+  // Add buttons to submenu
+  submenu.appendChild(knowledgeButton);
+  submenu.appendChild(fillFormButton);
+  
+  // Add submenu to document
+  document.body.appendChild(submenu);
+  
+  // Position and show the submenu
+  showFormFillSubmenu();
+}
+
+// Create a submenu button with specified properties
+function createSubmenuButton(id, icon, tooltip, action) {
+  const button = document.createElement('div');
+  button.id = id;
+  button.className = 'dei-menu-option';
+  button.innerHTML = icon;
+  button.style.opacity = '1';
+  button.style.pointerEvents = 'auto';
+  
+  // Create tooltip for this button
+  const buttonTooltip = document.createElement('div');
+  buttonTooltip.id = `${id}-tooltip`;
+  buttonTooltip.className = 'dei-tooltip';
+  buttonTooltip.textContent = tooltip;
+  document.body.appendChild(buttonTooltip);
+  
+  // Add hover events for tooltip
+  button.addEventListener('mouseover', () => {
+    const rect = button.getBoundingClientRect();
+    buttonTooltip.style.top = rect.top + 'px';
+    buttonTooltip.style.left = (rect.right + 10) + 'px';
+    buttonTooltip.style.opacity = '1';
+  });
+  
+  button.addEventListener('mouseout', () => {
+    buttonTooltip.style.opacity = '0';
+  });
+  
+  // Add click event
+  button.addEventListener('click', action);
+  
+  return button;
+}
+
+// Show the form fill submenu
+function showFormFillSubmenu() {
+  const submenu = document.getElementById('dei-form-submenu');
+  if (!submenu) return;
+  
+  // Position submenu relative to the form button
+  const formButton = document.getElementById('dei-form-option');
+  if (formButton) {
+    const rect = formButton.getBoundingClientRect();
+    submenu.style.top = `${rect.top - 120}px`;
+    submenu.style.left = `${rect.left}px`;
+  }
+  
+  // Show submenu with animation
+  submenu.style.display = 'flex';
+  setTimeout(() => {
+    submenu.style.opacity = '1';
+  }, 10);
+}
+
+// Hide the form fill submenu
+function hideFormFillSubmenu() {
+  const submenu = document.getElementById('dei-form-submenu');
+  if (!submenu) return;
+  
+  submenu.style.opacity = '0';
+  setTimeout(() => {
+    submenu.style.display = 'none';
+  }, 200);
+}
+
+// Open knowledge base modal
+function openKnowledgeBase() {
+  debugLog("Opening knowledge base");
+  
+  // Hide the submenu if it exists
+  const submenu = document.getElementById('dei-form-submenu');
+  if (submenu) {
+    submenu.style.opacity = '0';
+    setTimeout(() => {
+      submenu.style.display = 'none';
+    }, 200);
+  }
+  
+  // Open the knowledge base in a new tab
+  chrome.runtime.sendMessage({
+    action: "openKnowledgeBase"
+  });
+  
+  // Show a toast message
+  showToast("Opening knowledge base...", 2000);
+}
+
+// Create knowledge base modal
+function createKnowledgeBaseModal() {
+  debugLog("Creating knowledge base modal");
+  
+  // Create modal container
+  const modal = document.createElement('div');
+  modal.id = 'dei-knowledge-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    font-family: ${DEI_THEME.dark.fontPrimary};
+    backdrop-filter: blur(4px);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  `;
+  
+  // Create modal content
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = `
+    background-color: ${DEI_THEME.dark.card};
+    width: 85%;
+    max-width: 600px;
+    max-height: 85%;
+    overflow-y: auto;
+    border-radius: ${DEI_THEME.dark.radius};
+    border: 1px solid ${DEI_THEME.dark.border};
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    padding: 24px;
+    position: relative;
+    color: ${DEI_THEME.dark.foreground};
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    animation: modalFadeIn 0.3s ease-out;
+  `;
+  
+  // Create close button
+  const closeButton = document.createElement('div');
+  closeButton.innerHTML = '&times;';
+  closeButton.style.cssText = `
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-size: 24px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    z-index: 1;
+  `;
+  closeButton.addEventListener('click', () => {
+    modal.style.display = 'none';
+  });
+  
+  // Create title
+  const title = document.createElement('h2');
+  title.textContent = 'Knowledge Base';
+  title.style.cssText = `
+    margin: 0 0 16px 0;
+    font-size: 20px;
+    font-weight: 600;
+  `;
+  
+  // Create knowledge items container
+  const knowledgeContainer = document.createElement('div');
+  knowledgeContainer.id = 'dei-knowledge-items';
+  knowledgeContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 12px;
+    background-color: ${DEI_THEME.dark.background};
+    border-radius: ${DEI_THEME.dark.radius};
+  `;
+  
+  // Create input container similar to chat interface
+  const inputContainer = document.createElement('div');
+  inputContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+  `;
+  
+  // Create editable content area
+  const inputArea = document.createElement('div');
+  inputArea.id = 'dei-knowledge-input';
+  inputArea.contentEditable = true;
+  inputArea.style.cssText = `
+    font-size: 14px;
+    min-height: 60px;
+    max-height: 120px;
+    width: 100%;
+    overflow-y: auto;
+    padding: 8px;
+    background-color: ${DEI_THEME.dark.background};
+    border-radius: ${DEI_THEME.dark.radius};
+    outline: none;
+    border: 1px solid ${DEI_THEME.dark.border};
+    white-space: pre-wrap;
+    word-break: break-word;
+  `;
+  inputArea.dataset.placeholder = 'Add new information to your knowledge base...';
+  
+  // Create button container
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.cssText = `
+    display: flex;
+    gap: 8px;
+  `;
+  
+  // Create record button container
+  const recordButtonContainer = document.createElement('div');
+  recordButtonContainer.style.cssText = `
+    position: relative;
+  `;
+  
+  // Create record button for knowledge input
+  const recordButton = document.createElement('button');
+  recordButton.id = 'dei-knowledge-record-button';
+  recordButton.innerHTML = '🎙️';
+  recordButton.title = 'Record Voice Input';
+  recordButton.style.cssText = `
+    background-color: ${DEI_THEME.dark.primary};
+    color: ${DEI_THEME.dark.foreground};
+    border: none;
+    border-radius: ${DEI_THEME.dark.radius};
+    padding: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  
+  // Create recording indicator for knowledge input
+  const recordingWave = document.createElement('div');
+  recordingWave.id = 'dei-knowledge-recording-wave';
+  recordingWave.style.cssText = `
+    display: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: red;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    animation: pulse 1.5s infinite ease-in-out;
+  `;
+  
+  // Create add button
+  const addButton = document.createElement('button');
+  addButton.id = 'dei-knowledge-add-button';
+  addButton.innerHTML = 'Add';
+  addButton.style.cssText = `
+    background-color: ${DEI_THEME.dark.accent};
+    color: ${DEI_THEME.dark.foreground};
+    border: none;
+    border-radius: ${DEI_THEME.dark.radius};
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  `;
+  
+  // Add click event to record button
+  recordButton.addEventListener('click', () => {
+    if (!isRecording) {
+      startKnowledgeRecording();
+      recordButton.innerHTML = '■';
+      recordButton.title = 'Stop Recording';
+      recordButton.style.backgroundColor = '#dc3545'; // Red for recording
+      recordingWave.style.display = 'block';
+    } else {
+      stopKnowledgeRecording();
+      recordButton.innerHTML = '🎙️';
+      recordButton.title = 'Record Voice Input';
+      recordButton.style.backgroundColor = DEI_THEME.dark.primary;
+      recordingWave.style.display = 'none';
+    }
+  });
+  
+  // Add click event to add button
+  addButton.addEventListener('click', addToKnowledgeBase);
+  
+  // Allow Enter key to add item (Shift+Enter for new line)
+  inputArea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      addButton.click();
+    }
+  });
+  
+  // Build the modal
+  recordButtonContainer.appendChild(recordButton);
+  recordButtonContainer.appendChild(recordingWave);
+  buttonContainer.appendChild(recordButtonContainer);
+  buttonContainer.appendChild(addButton);
+  
+  inputContainer.appendChild(inputArea);
+  inputContainer.appendChild(buttonContainer);
+  
+  modalContent.appendChild(closeButton);
+  modalContent.appendChild(title);
+  modalContent.appendChild(knowledgeContainer);
+  modalContent.appendChild(inputContainer);
+  
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+  
+  // Display knowledge items
+  displayKnowledgeItems();
+}
+
+// Function to start recording for knowledge base
+async function startKnowledgeRecording() {
+  try {
+    debugLog("Starting knowledge recording");
+    
+    // Get the audio stream
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    
+    mediaRecorder.ondataavailable = (event) => {
+      audioChunks.push(event.data);
+    };
+    
+    mediaRecorder.onstop = async () => {
+      // Create audio blob for sending
+      const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+      
+      // Get the transcript from the editable area
+      const inputArea = document.getElementById('dei-knowledge-input');
+      
+      // If we have transcript content from recognition, use it
+      if (transcriptContent.trim() && inputArea) {
+        // Set the recognized text to the editable area
+        inputArea.innerText = transcriptContent;
+        
+        // Focus the input area for editing
+        inputArea.focus();
+      } else if (inputArea) {
+        // No transcript from recognition
+        inputArea.innerText = "Could not transcribe audio. Please type your information.";
+        inputArea.focus();
+        inputArea.select(); // Select all text for easy replacement
+      }
+    };
+    
+    // Start recording audio
+    mediaRecorder.start();
+    isRecording = true;
+    
+    // Reset transcript content
+    transcriptContent = '';
+    
+    // Start live transcription concurrently
+    if (!("webkitSpeechRecognition" in window)) {
+      const inputArea = document.getElementById('dei-knowledge-input');
+      if (inputArea) {
+        inputArea.innerText = "Speech recognition not supported in this browser.";
+      }
+      return;
+    }
+    
+    recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    
+    let finalTranscript = "";
+    recognition.onresult = (event) => {
+      let interimTranscript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      
+      // Update transcript content
+      transcriptContent = finalTranscript;
+      
+      // Update display in editable area
+      const inputArea = document.getElementById('dei-knowledge-input');
+      if (inputArea) {
+        inputArea.innerText = `${finalTranscript} ${interimTranscript}`;
+      }
+    };
+    
+    recognition.onend = () => {
+      if (isRecording) {
+        // If recording is still active but recognition ended, restart it
+        recognition.start();
+      }
+    };
+    
+    recognition.start();
+    
+    debugLog("Knowledge recording started");
+  } catch (error) {
+    console.error("Error accessing microphone:", error);
+    
+    const inputArea = document.getElementById('dei-knowledge-input');
+    if (inputArea) {
+      inputArea.innerText = "Microphone access denied. Please allow access in browser settings.";
+    }
+    
+    isRecording = false;
+    const recordButton = document.getElementById('dei-knowledge-record-button');
+    if (recordButton) {
+      recordButton.innerHTML = '🎙️';
+      recordButton.title = 'Record Voice Input';
+      recordButton.style.backgroundColor = DEI_THEME.dark.primary;
+    }
+    const recordingWave = document.getElementById('dei-knowledge-recording-wave');
+    if (recordingWave) {
+      recordingWave.style.display = 'none';
+    }
+  }
+}
+
+// Function to stop knowledge recording
+function stopKnowledgeRecording() {
+  debugLog("Stopping knowledge recording");
+  
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    
+    // Stop all tracks in the stream
+    if (mediaRecorder.stream) {
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    isRecording = false;
+    
+    if (recognition) {
+      recognition.stop();
+    }
+    
+    debugLog("Knowledge recording stopped");
+  }
+}
+
+// Function to add item to knowledge base
+function addToKnowledgeBase() {
+  const inputArea = document.getElementById('dei-knowledge-input');
+  if (!inputArea) return;
+  
+  const text = inputArea.innerText.trim();
+  if (!text) return;
+  
+  // Get existing knowledge items from local storage
+  let knowledgeItems = JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]');
+  
+  // Add new item with timestamp
+  knowledgeItems.push({
+    id: Date.now(),
+    text: text,
+    date: new Date().toISOString()
+  });
+  
+  // Save to local storage
+  localStorage.setItem('deiKnowledgeBase', JSON.stringify(knowledgeItems));
+  
+  // Clear input area
+  inputArea.innerText = '';
+  
+  // Display updated items
+  displayKnowledgeItems();
+  
+  // Show success message
+  showToast('Added to your knowledge base', 2000);
+}
+
+// Function to display knowledge items
+function displayKnowledgeItems() {
+  const container = document.getElementById('dei-knowledge-items');
+  if (!container) return;
+  
+  // Get items from local storage
+  const knowledgeItems = JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]');
+  
+  // Clear the container
+  container.innerHTML = '';
+  
+  if (knowledgeItems.length === 0) {
+    // Show empty state
+    const emptyState = document.createElement('div');
+    emptyState.style.cssText = `
+      text-align: center;
+      color: ${DEI_THEME.dark.muted};
+      padding: 24px 0;
+    `;
+    emptyState.innerText = 'No items in your knowledge base yet. Add information below.';
+    container.appendChild(emptyState);
+    return;
+  }
+  
+  // Add each item
+  knowledgeItems.forEach(item => {
+    const itemElement = document.createElement('div');
+    itemElement.className = 'dei-knowledge-item';
+    itemElement.style.cssText = `
+      background-color: ${DEI_THEME.dark.secondary};
+      border-radius: ${DEI_THEME.dark.radius};
+      padding: 12px;
+      position: relative;
+    `;
+    
+    // Format date
+    const date = new Date(item.date);
+    const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    
+    // Create delete button
+    const deleteButton = document.createElement('button');
+    deleteButton.innerHTML = '&times;';
+    deleteButton.style.cssText = `
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      color: ${DEI_THEME.dark.muted};
+      font-size: 16px;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    `;
+    deleteButton.addEventListener('mouseenter', () => {
+      deleteButton.style.opacity = '1';
+    });
+    deleteButton.addEventListener('mouseleave', () => {
+      deleteButton.style.opacity = '0.7';
+    });
+    deleteButton.addEventListener('click', () => {
+      deleteKnowledgeItem(item.id);
+    });
+    
+    // Create item content
+    const itemContent = document.createElement('div');
+    itemContent.style.cssText = `
+      margin-right: 20px;
+      word-break: break-word;
+    `;
+    itemContent.innerText = item.text;
+    
+    // Create time element
+    const timeElement = document.createElement('div');
+    timeElement.style.cssText = `
+      font-size: 12px;
+      color: ${DEI_THEME.dark.muted};
+      margin-top: 8px;
+    `;
+    timeElement.innerText = formattedDate;
+    
+    // Build the item
+    itemElement.appendChild(deleteButton);
+    itemElement.appendChild(itemContent);
+    itemElement.appendChild(timeElement);
+    
+    container.appendChild(itemElement);
+  });
+}
+
+// Function to delete a knowledge item
+function deleteKnowledgeItem(id) {
+  // Get existing knowledge items
+  let knowledgeItems = JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]');
+  
+  // Filter out the item to delete
+  knowledgeItems = knowledgeItems.filter(item => item.id !== id);
+  
+  // Save updated items
+  localStorage.setItem('deiKnowledgeBase', JSON.stringify(knowledgeItems));
+  
+  // Update the display
+  displayKnowledgeItems();
+  
+  // Show success message
+  showToast('Item deleted', 2000);
+}
+
+// Function to handle form filling
+async function fillFormAction() {
+  try {
+    // Show processing toast
+    showToast('Analyzing form elements...', 2000);
+    
+    // First, immediately sync knowledge base data
+    debugLog("Syncing knowledge base data before parsing form");
+    await syncKnowledgeBaseData();
+    
+    // Parse form elements
+    const formElements = parseFormElements();
+    
+    if (!formElements || formElements.length === 0) {
+      showToast('No form elements found on this page', 3000);
+      return;
+    }
+    
+    // Show processing toast
+    showToast(`Found ${formElements.length} form elements. Processing...`, 3000);
+    
+    // Send form elements to backend
+    await sendFormDataToBackend(formElements);
+  } catch (error) {
+    console.error("Error in fillFormAction:", error);
+    showToast(`Error: ${error.message}`, 3000);
+  }
+}
+
+// Function to parse form elements from the page
+function parseFormElements() {
+  const formElements = [];
+  
+  debugLog("Starting form element parsing");
+  
+  // Part 1: Handle traditional HTML radio buttons
+  const radioGroups = new Map();
+  document.querySelectorAll('input[type="radio"]').forEach((radio, index) => {
+    if (!radio.name) {
+      debugLog(`Radio button without name, skipping grouping: ${radio.id || "unnamed"}`);
+      return;
+    }
+    
+    if (!radioGroups.has(radio.name)) {
+      radioGroups.set(radio.name, []);
+    }
+    radioGroups.get(radio.name).push(radio);
+  });
+  
+  debugLog(`Found ${radioGroups.size} traditional radio button groups`);
+  
+  // Part 2: Handle ARIA-based radio groups (like Google Forms)
+  const ariaRadioGroups = new Map();
+  
+  // Find all elements with role="radiogroup"
+  document.querySelectorAll('[role="radiogroup"]').forEach((group, index) => {
+    const groupId = group.id || `aria_radio_group_${index}`;
+    debugLog(`Found ARIA radio group: ${groupId}`);
+    
+    // Find all radio buttons within this group
+    const radioButtons = group.querySelectorAll('[role="radio"]');
+    if (radioButtons.length > 0) {
+      ariaRadioGroups.set(groupId, {
+        container: group,
+        buttons: Array.from(radioButtons)
+      });
+    }
+  });
+  
+  debugLog(`Found ${ariaRadioGroups.size} ARIA radio button groups`);
+  
+  // Process traditional radio groups
+  radioGroups.forEach((radios, groupName) => {
+    debugLog(`Processing traditional radio group: ${groupName} with ${radios.length} options`);
+    
+    // Find common container to help determine the group label
+    const container = findCommonContainer(radios);
+    
+    // Try to find the label for the radio group
+    let groupLabel = '';
+    
+    // Method 1: Check if there's a fieldset with legend
+    if (container && container.tagName === 'FIELDSET') {
+      const legend = container.querySelector('legend');
+      if (legend) {
+        groupLabel = legend.textContent.trim();
+        debugLog(`Found fieldset legend label: "${groupLabel}"`);
+      }
+    }
+    
+    // Method 2: Look for heading elements near the container
+    if (!groupLabel && container) {
+      const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6, p.form-label, label.form-label, div.form-label');
+      if (headings.length > 0) {
+        groupLabel = headings[0].textContent.trim();
+        debugLog(`Found heading label: "${groupLabel}"`);
+      }
+    }
+    
+    // Method 3: Check for a label that refers to the first radio's id
+    if (!groupLabel && radios[0].id) {
+      const label = document.querySelector(`label[for="${radios[0].id}"]`);
+      if (label && label.parentElement) {
+        // Try to get the parent's text that's not in the label
+        const parent = label.parentElement;
+        const parentText = Array.from(parent.childNodes)
+          .filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent.trim())
+          .join(' ')
+          .trim();
+          
+        if (parentText) {
+          groupLabel = parentText;
+          debugLog(`Found parent text label: "${groupLabel}"`);
+        }
+      }
+    }
+    
+    // Method 4: Fallback to the name attribute if no label is found
+    if (!groupLabel) {
+      groupLabel = groupName.replace(/([A-Z])/g, ' $1')
+        .replace(/_/g, ' ')
+        .replace(/-/g, ' ')
+        .trim();
+      debugLog(`Using formatted name as label: "${groupLabel}"`);
+    }
+    
+    // Get the options for the radio group
+    const options = radios.map(radio => {
+      let optionText = '';
+      
+      // Method 1: Check for associated label
+      if (radio.id) {
+        const label = document.querySelector(`label[for="${radio.id}"]`);
+        if (label) {
+          optionText = label.textContent.trim();
+          debugLog(`Found label for option: "${optionText}"`);
+        }
+      }
+      
+      // Method 2: Check if radio is inside a label
+      if (!optionText) {
+        const parentLabel = radio.closest('label');
+        if (parentLabel) {
+          // Get text content but exclude text from any child inputs
+          optionText = Array.from(parentLabel.childNodes)
+            .filter(node => node.nodeType === Node.TEXT_NODE)
+            .map(node => node.textContent.trim())
+            .join(' ')
+            .trim();
+          debugLog(`Found parent label text: "${optionText}"`);
+        }
+      }
+      
+      // Method 3: Check next sibling for text
+      if (!optionText) {
+        let sibling = radio.nextSibling;
+        while (sibling && !optionText) {
+          if (sibling.nodeType === Node.TEXT_NODE && sibling.textContent.trim()) {
+            optionText = sibling.textContent.trim();
+            debugLog(`Found sibling text: "${optionText}"`);
+          } else if (sibling.nodeType === Node.ELEMENT_NODE && sibling.tagName === 'LABEL') {
+            optionText = sibling.textContent.trim();
+            debugLog(`Found sibling label: "${optionText}"`);
+            break;
+          }
+          sibling = sibling.nextSibling;
+        }
+      }
+      
+      // Method 4: Fallback to value attribute
+      if (!optionText) {
+        optionText = radio.value;
+        debugLog(`Using value as option text: "${optionText}"`);
+      }
+      
+      return {
+        value: radio.value,
+        text: optionText
+      };
+    });
+    
+    // Get position, path, and surrounding context for the radio group
+    const firstRadio = radios[0];
+    const position = {
+      x: firstRadio.getBoundingClientRect().left,
+      y: firstRadio.getBoundingClientRect().top
+    };
+    const positionPath = getElementPath(firstRadio);
+    const surroundingContext = getSurroundingText(container || firstRadio);
+    
+    // Create a unique ID for the group
+    const groupId = `radio_group_${groupName}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Add the radio group to formElements
+    formElements.push({
+      type: 'radio_group',
+      id: groupId,
+      name: groupName,
+      label: groupLabel,
+      element: firstRadio,
+      options: options,
+      possibleValues: options, // Add possibleValues to match expected format
+      position: position,
+      positionPath: positionPath,
+      surroundingContext: surroundingContext
+    });
+  });
+  
+  // Process ARIA-based radio groups
+  ariaRadioGroups.forEach((group, groupId) => {
+    const container = group.container;
+    const radioButtons = group.buttons;
+    
+    debugLog(`Processing ARIA radio group: ${groupId} with ${radioButtons.length} options`);
+    
+    // Try to find the label for the ARIA radio group
+    let groupLabel = '';
+    
+    // Method 1: Check if the radiogroup has aria-labelledby
+    if (container.hasAttribute('aria-labelledby')) {
+      const labelledById = container.getAttribute('aria-labelledby');
+      const labelElement = document.getElementById(labelledById);
+      if (labelElement) {
+        groupLabel = labelElement.textContent.trim();
+        debugLog(`Found aria-labelledby label: "${groupLabel}"`);
+      }
+    }
+    
+    // Method 2: Look for heading elements with role="heading" nearby
+    if (!groupLabel) {
+      // Look up to 3 parent levels up
+      let currentElement = container;
+      let found = false;
+      
+      for (let i = 0; i < 3 && !found && currentElement; i++) {
+        // Check for role="heading" elements
+        const headings = currentElement.querySelectorAll('[role="heading"]');
+        if (headings.length > 0) {
+          groupLabel = headings[0].textContent.trim();
+          debugLog(`Found role="heading" label: "${groupLabel}"`);
+          found = true;
+          break;
+        }
+        
+        // Check for regular heading elements too
+        const regularHeadings = currentElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        if (regularHeadings.length > 0) {
+          groupLabel = regularHeadings[0].textContent.trim();
+          debugLog(`Found regular heading label: "${groupLabel}"`);
+          found = true;
+          break;
+        }
+        
+        // Move up to parent
+        currentElement = currentElement.parentElement;
+      }
+    }
+    
+    // Method 3: If still no label, check siblings of container
+    if (!groupLabel && container.parentElement) {
+      // Check previous siblings
+      let prevSibling = container.previousElementSibling;
+      while (prevSibling && !groupLabel) {
+        // Check if this sibling is a heading or has role="heading"
+        if (prevSibling.matches('h1, h2, h3, h4, h5, h6') || 
+            prevSibling.getAttribute('role') === 'heading') {
+          groupLabel = prevSibling.textContent.trim();
+          debugLog(`Found sibling heading label: "${groupLabel}"`);
+          break;
+        }
+        
+        // Or check if it contains a heading
+        const nestedHeadings = prevSibling.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]');
+        if (nestedHeadings.length > 0) {
+          groupLabel = nestedHeadings[0].textContent.trim();
+          debugLog(`Found nested heading in sibling: "${groupLabel}"`);
+          break;
+        }
+        
+        prevSibling = prevSibling.previousElementSibling;
+      }
+    }
+    
+    // Method 4: Generic fallback if no label found
+    if (!groupLabel) {
+      groupLabel = `Question ${formElements.length + 1}`;
+      debugLog(`Using generic label: "${groupLabel}"`);
+    }
+    
+    // Extract options from ARIA radio buttons
+    const options = radioButtons.map(button => {
+      // Try to get option text from various sources
+      let optionText = '';
+      
+      // Method 1: Check aria-label attribute
+      if (button.hasAttribute('aria-label')) {
+        optionText = button.getAttribute('aria-label');
+        debugLog(`Found aria-label for option: "${optionText}"`);
+      }
+      
+      // Method 2: Check data-value attribute (common in Google Forms)
+      if (!optionText && button.hasAttribute('data-value')) {
+        optionText = button.getAttribute('data-value');
+        debugLog(`Found data-value for option: "${optionText}"`);
+      }
+      
+      // Method 3: Look for text inside the button
+      if (!optionText) {
+        // Find span elements containing text
+        const textSpans = button.querySelectorAll('span:not(:empty)');
+        if (textSpans.length > 0) {
+          optionText = textSpans[0].textContent.trim();
+          debugLog(`Found text span in button: "${optionText}"`);
+        }
+      }
+      
+      // Method 4: Look for text in parent label
+      if (!optionText) {
+        const parentLabel = button.closest('label');
+        if (parentLabel) {
+          // Find spans with text
+          const spans = parentLabel.querySelectorAll('span:not(:empty)');
+          if (spans.length > 0) {
+            optionText = spans[spans.length - 1].textContent.trim(); // Often the last span has the text
+            debugLog(`Found text in parent label span: "${optionText}"`);
+          } else {
+            // If no spans, use the label text
+            optionText = parentLabel.textContent.trim();
+            debugLog(`Using parent label text: "${optionText}"`);
+          }
+        }
+      }
+      
+      // Method 5: Generic fallback
+      if (!optionText) {
+        optionText = `Option ${radioButtons.indexOf(button) + 1}`;
+        debugLog(`Using generic option text: "${optionText}"`);
+      }
+      
+      // Determine value - use optionText if no explicit value is found
+      const value = button.hasAttribute('data-value') ? 
+                   button.getAttribute('data-value') : 
+                   optionText;
+      
+      return {
+        value: value,
+        text: optionText
+      };
+    });
+    
+    // Get position info for the first radio button
+    const firstButton = radioButtons[0];
+    const position = {
+      x: firstButton.getBoundingClientRect().left,
+      y: firstButton.getBoundingClientRect().top
+    };
+    const positionPath = getElementPath(firstButton);
+    const surroundingContext = getSurroundingText(container);
+    
+    // Create a unique ID for this ARIA radio group
+    const uniqueGroupId = `aria_radio_group_${groupId}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Add ARIA radio group to form elements
+    formElements.push({
+      type: 'radio_group',
+      id: uniqueGroupId,
+      name: groupId,
+      label: groupLabel,
+      element: firstButton,
+      options: options,
+      possibleValues: options, // Add possibleValues to match expected format
+      position: position,
+      positionPath: positionPath,
+      surroundingContext: surroundingContext,
+      isAriaGroup: true
+    });
+  });
+  
+  // Part 3: Look for other forms of custom radio/option groups (like divs with selected class, etc.)
+  // This is for sites that use completely custom implementations
+  
+  // Look for elements that might be custom radio groups
+  const potentialCustomGroups = Array.from(document.querySelectorAll('.radio-group, .option-group, .choices, [data-type="radio-group"]'));
+  
+  // Also look for div containers that have child elements with 'selected' or 'active' classes
+  document.querySelectorAll('div, ul').forEach(container => {
+    // Check if this container has children with selected/active classes
+    const hasSelectedChildren = container.querySelector('.selected, .active, .checked, [aria-selected="true"], [aria-checked="true"]');
+    if (hasSelectedChildren) {
+      // This might be a custom radio/select group
+      potentialCustomGroups.push(container);
+    }
+  });
+  
+  debugLog(`Found ${potentialCustomGroups.length} potential custom radio/option groups`);
+  
+  // Process each potential custom group
+  potentialCustomGroups.forEach((container, index) => {
+    // Skip if this container is already part of a radio group we processed
+    const isAlreadyProcessed = formElements.some(el => 
+      el.type === 'radio_group' && 
+      (el.element.closest(`#${container.id}`) || container.contains(el.element))
+    );
+    
+    if (isAlreadyProcessed) {
+      return;
+    }
+    
+    // Look for elements that might be options in this container
+    const potentialOptions = container.querySelectorAll('.option, .choice, .radio, li, [role="option"], [role="menuitem"]');
+    
+    if (potentialOptions.length < 2) {
+      // Need at least 2 options to be considered a proper group
+      return;
+    }
+    
+    debugLog(`Processing potential custom group with ${potentialOptions.length} options`);
+    
+    // Look for a label for this group
+    let groupLabel = '';
+    
+    // Check for a preceding heading
+    let currentElement = container;
+    for (let i = 0; i < 3 && currentElement && !groupLabel; i++) {
+      // Check for headings before this element
+      if (currentElement.previousElementSibling) {
+        const prevElement = currentElement.previousElementSibling;
+        if (prevElement.matches('h1, h2, h3, h4, h5, h6, label, .label, .heading')) {
+          groupLabel = prevElement.textContent.trim();
+          debugLog(`Found preceding heading for custom group: "${groupLabel}"`);
+        }
+      }
+      
+      // Check if parent has a heading child that comes before this container
+      if (!groupLabel && currentElement.parentElement) {
+        const parent = currentElement.parentElement;
+        const headings = Array.from(parent.querySelectorAll('h1, h2, h3, h4, h5, h6, label, .label, .heading'));
+        
+        // Find a heading that comes before this container
+        for (const heading of headings) {
+          if (parent.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_PRECEDING) {
+            groupLabel = heading.textContent.trim();
+            debugLog(`Found heading in parent for custom group: "${groupLabel}"`);
+            break;
+          }
+        }
+      }
+      
+      currentElement = currentElement.parentElement;
+    }
+    
+    // Generic fallback for group label
+    if (!groupLabel) {
+      // Try to use container's aria-label or title if available
+      groupLabel = container.getAttribute('aria-label') || 
+                  container.getAttribute('title') || 
+                  `Custom Group ${index + 1}`;
+      debugLog(`Using fallback label for custom group: "${groupLabel}"`);
+    }
+    
+    // Extract options
+    const options = Array.from(potentialOptions).map((option, idx) => {
+      let optionText = '';
+      
+      // Try to get text from various sources
+      if (option.textContent.trim()) {
+        optionText = option.textContent.trim();
+      } else {
+        // Look for child elements with text
+        const textElements = option.querySelectorAll('span, div, p');
+        for (const el of textElements) {
+          if (el.textContent.trim()) {
+            optionText = el.textContent.trim();
+            break;
+          }
+        }
+      }
+      
+      // Fallback
+      if (!optionText) {
+        optionText = `Option ${idx + 1}`;
+      }
+      
+      // Try to determine value
+      let value = option.getAttribute('data-value') || 
+                 option.getAttribute('value') || 
+                 optionText;
+                 
+      return {
+        value: value,
+        text: optionText
+      };
+    });
+    
+    // Get position info
+    const position = {
+      x: container.getBoundingClientRect().left,
+      y: container.getBoundingClientRect().top
+    };
+    const positionPath = getElementPath(container);
+    const surroundingContext = getSurroundingText(container);
+    
+    // Create unique ID
+    const customGroupId = `custom_group_${index}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Add to form elements
+    formElements.push({
+      type: 'radio_group', // Treat custom groups as radio groups
+      id: customGroupId,
+      name: container.id || `custom_group_${index}`,
+      label: groupLabel,
+      element: container,
+      options: options,
+      possibleValues: options, // Add possibleValues to match expected format
+      position: position,
+      positionPath: positionPath,
+      surroundingContext: surroundingContext,
+      isCustomGroup: true
+    });
+  });
+  
+  // Get all non-radio input elements
+  const inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="file"]):not([type="radio"]), select, textarea');
+  
+  debugLog(`Found ${inputs.length} non-radio input elements`);
+  
+  // Process each non-radio input
+  inputs.forEach((input, index) => {
+    // Skip if this is already covered in a radio group
+    if (input.type === 'radio') {
+      return;
+    }
+    
+    // Generate a unique ID if the element doesn't have one
+    const elementId = input.id || input.name || `element_${index}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Try to find the label text
+    let labelText = '';
+    
+    // Method 1: Check for an associated label element
+    if (input.id) {
+      const label = document.querySelector(`label[for="${input.id}"]`);
+      if (label) {
+        labelText = label.textContent.trim();
+      }
+    }
+    
+    // Method 2: Check if input is inside a label
+    if (!labelText) {
+      const parentLabel = input.closest('label');
+      if (parentLabel) {
+        // Get text content but exclude text from any child inputs
+        labelText = Array.from(parentLabel.childNodes)
+          .filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent.trim())
+          .join(' ')
+          .trim();
+      }
+    }
+    
+    // Method 3: Check for placeholder attribute
+    if (!labelText && input.placeholder) {
+      labelText = input.placeholder;
+    }
+    
+    // Method 4: Check for aria-label attribute
+    if (!labelText && input.getAttribute('aria-label')) {
+      labelText = input.getAttribute('aria-label');
+    }
+    
+    // Method 5: Look for a preceding heading or paragraph
+    if (!labelText) {
+      const prevElements = [];
+      let current = input.previousElementSibling;
+      let count = 0;
+      
+      while (current && count < 3) {
+        prevElements.unshift(current);
+        current = current.previousElementSibling;
+        count++;
+      }
+      
+      for (const prev of prevElements) {
+        if (prev.tagName.match(/^H[1-6]$/) || prev.tagName === 'P' || 
+            prev.tagName === 'LABEL' || prev.tagName === 'DIV') {
+          const text = prev.textContent.trim();
+          if (text) {
+            labelText = text;
+            break;
+          }
+        }
+      }
+    }
+    
+    // Method 6: Fallback to name attribute
+    if (!labelText && input.name) {
+      labelText = input.name.replace(/([A-Z])/g, ' $1')
+        .replace(/_/g, ' ')
+        .replace(/-/g, ' ')
+        .trim();
+    }
+    
+    // If still no label, use a generic one
+    if (!labelText) {
+      labelText = `${input.type || input.tagName} field ${index + 1}`;
+    }
+    
+    // Get position, path, and surrounding context for better identification
+    const position = {
+      x: input.getBoundingClientRect().left,
+      y: input.getBoundingClientRect().top
+    };
+    const positionPath = getElementPath(input);
+    const surroundingContext = getSurroundingText(input);
+    
+    // Create the form element object
+    const formElement = {
+      type: input.type || input.tagName.toLowerCase(),
+      id: elementId,
+      name: input.name || '',
+      label: labelText,
+      element: input,
+      position: position,
+      positionPath: positionPath,
+      surroundingContext: surroundingContext
+    };
+    
+    // Add special properties for different input types
+    if (input.tagName === 'SELECT') {
+      const selectOptions = Array.from(input.options).map(option => ({
+        value: option.value,
+        text: option.textContent
+      }));
+      formElement.options = selectOptions;
+      formElement.possibleValues = selectOptions; // Add possibleValues for select elements
+    } else if (input.type === 'checkbox') {
+      formElement.checked = input.checked;
+      // Add possible values for checkbox (true/false)
+      formElement.possibleValues = [
+        { value: true, text: 'Yes/Checked' },
+        { value: false, text: 'No/Unchecked' }
+      ];
+    } else {
+      // For text inputs, we can suggest that any text is possible
+      formElement.possibleValues = [{ value: "", text: "Text input - any value possible" }];
+    }
+    
+    // Get current value if any
+    if (input.value && input.type !== 'checkbox' && input.type !== 'radio') {
+      formElement.value = input.value;
+    }
+    
+    formElements.push(formElement);
+  });
+  
+  debugLog(`Found total of ${formElements.length} form elements (including ${radioGroups.size} traditional radio groups, ${ariaRadioGroups.size} ARIA radio groups, and other custom groups)`);
+  
+  // Debug log the structure of each form element to help diagnose issues
+  formElements.forEach((el, idx) => {
+    debugLog(`Form element ${idx+1}: type=${el.type}, label=${el.label}, possibleValues=${el.possibleValues ? el.possibleValues.length : 0} options`);
+  });
+  
+  return formElements;
+}
+
+// Helper function to find a common container for radio buttons
+function findCommonContainer(elements) {
+  if (!elements || elements.length === 0) return null;
+  if (elements.length === 1) return elements[0].parentElement;
+  
+  // Start with the first element's parent
+  let container = elements[0].parentElement;
+  
+  // Go up the DOM tree until we find a container that contains all elements
+  while (container && container !== document.body) {
+    let containsAll = true;
+    
+    for (let i = 1; i < elements.length; i++) {
+      if (!container.contains(elements[i])) {
+        containsAll = false;
+        break;
+      }
+    }
+    
+    if (containsAll) {
+      return container;
+    }
+    
+    container = container.parentElement;
+  }
+  
+  return null;
+}
+
+// Helper function to get a CSS-like path to the element
+function getElementPath(element) {
+  let path = [];
+  let current = element;
+  
+  while (current && current !== document.body) {
+    let selector = current.tagName.toLowerCase();
+    
+    // Add ID if it exists
+    if (current.id) {
+      selector += `#${current.id}`;
+    } 
+    // Otherwise add classes
+    else if (current.className) {
+      const classes = Array.from(current.classList).join('.');
+      if (classes) {
+        selector += `.${classes}`;
+      }
+    }
+    
+    // Add position among siblings
+    const siblings = Array.from(current.parentNode.children);
+    const index = siblings.indexOf(current) + 1;
+    if (siblings.length > 1) {
+      selector += `:nth-child(${index})`;
+    }
+    
+    path.unshift(selector);
+    current = current.parentNode;
+    
+    // Limit path length
+    if (path.length >= 4) break;
+  }
+  
+  return path.join(' > ');
+}
+
+// Helper function to get surrounding text near an element
+function getSurroundingText(element) {
+  // Try to get the surrounding paragraph or container
+  let container = element.parentElement;
+  let depth = 0;
+  const maxDepth = 3;
+  
+  while (container && depth < maxDepth) {
+    // If this is a substantial container, use its text
+    if (['p', 'div', 'section', 'fieldset', 'form'].includes(container.tagName.toLowerCase())) {
+      const clone = container.cloneNode(true);
+      
+      // Remove scripts, inputs, etc.
+      ['script', 'style', 'input', 'select', 'button', 'textarea'].forEach(tag => {
+        Array.from(clone.querySelectorAll(tag)).forEach(el => el.remove());
+      });
+      
+      const text = clone.textContent.trim();
+      if (text.length > 10 && text.length < 200) {  // Reasonable length for context
+        return text;
+      }
+    }
+    
+    container = container.parentElement;
+    depth++;
+  }
+  
+  // If we couldn't find a good container, get nearby text nodes
+  const range = 100; // Look within 100px
+  const rect = element.getBoundingClientRect();
+  const nearbyElements = document.elementsFromPoint(rect.left, rect.top - 20);
+  
+  for (const nearby of nearbyElements) {
+    if (nearby !== element && nearby.textContent) {
+      const text = nearby.textContent.trim();
+      if (text.length > 0 && text.length < 100) {
+        return text;
+      }
+    }
+  }
+  
+  return '';
+}
+
+// Function to sync knowledge base data from other tabs
+function syncKnowledgeBaseData() {
+  return new Promise((resolve) => {
+    // Check if we need to sync data from the knowledge-base.html page
+    // This ensures we have the latest data from any open knowledge base tabs
+    try {
+      // Send a message to all tabs to request the latest knowledge base data
+      chrome.runtime.sendMessage({
+        action: 'requestKnowledgeBaseData'
+      }, response => {
+        if (chrome.runtime.lastError) {
+          console.error("Error requesting knowledge base data:", chrome.runtime.lastError);
+          // Resolve with the current data even if there's an error
+          resolve(JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]'));
+          return;
+        }
+        
+        if (response && response.success && response.knowledgeItems) {
+          debugLog(`Received ${response.knowledgeItems.length} knowledge items from sync`);
+          
+          // Update localStorage with the latest data
+          localStorage.setItem('deiKnowledgeBase', JSON.stringify(response.knowledgeItems));
+          debugLog("Knowledge base data synced successfully");
+          resolve(response.knowledgeItems);
+        } else if (response && response.error) {
+          debugLog("Knowledge base sync error:", response.error);
+          // Resolve with the current data
+          resolve(JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]'));
+        } else {
+          // Resolve with the current data
+          resolve(JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]'));
+        }
+      });
+    } catch (error) {
+      console.error("Error syncing knowledge base data:", error);
+      // Resolve with the current data
+      resolve(JSON.parse(localStorage.getItem('deiKnowledgeBase') || '[]'));
+    }
+  });
+}
+
+// Function to send form data to backend
+async function sendFormDataToBackend(formElements) {
+  try {
+    debugLog("Sending form data to backend");
+    
+    // Sync knowledge base data from other tabs first and wait for the result
+    const knowledgeItems = await syncKnowledgeBaseData();
+    debugLog("After sync, knowledge items count:", knowledgeItems.length);
+    
+    // Prepare data to send - include the enhanced information but remove DOM elements
+    const formData = formElements.map(element => {
+      // Don't send the DOM element
+      const { element: domElement, ...rest } = element;
+      
+      // Keep important fields for identification
+      return {
+        ...rest,
+        // Include specific fields that help identify duplicates
+        id: element.id || '',
+        name: element.name || '',
+        type: element.type || 'text',
+        label: element.label || '',
+        position: element.position,
+        positionPath: element.positionPath,
+        surroundingContext: element.surroundingContext?.substring(0, 100), // Limit context size
+        possibleValues: element.possibleValues || []
+      };
+    });
+    
+    // Format user data nicely as a structured document
+    let userData = '';
+    if (knowledgeItems.length > 0) {
+      userData = "My Personal Information:\n\n";
+      knowledgeItems.forEach((item, index) => {
+        userData += `${index + 1}. ${item.text}\n`;
+      });
+    } else {
+      userData = "No personal information provided.";
+    }
+    
+    // Debug log what we're sending
+    debugLog("Form data being sent:", formData);
+    debugLog("User data being sent:", userData);
+    
+    // Show processing toast
+    showToast(`Processing ${formData.length} form elements...`, 3000);
+    
+    // Send data to backend
+    const response = await fetch('http://127.0.0.1:5001/fill-form', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        form_data: formData,
+        user_data: userData
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.status === 'success' && data.form_answers) {
+      // Fill the form with the received answers
+      fillFormWithAnswers(data.form_answers, formElements);
+      showToast('Form filled successfully', 3000);
+    } else {
+      showToast('Could not generate form answers', 3000);
+    }
+    
+  } catch (error) {
+    console.error("Error filling form:", error);
+    showToast(`Error: ${error.message}`, 3000);
+  }
+}
+
+// Function to fill form with answers
+function fillFormWithAnswers(answers, formElements) {
+  debugLog("Filling form with answers", answers);
+  
+  answers.forEach(answer => {
+    // Make sure we have valid data before proceeding
+    if (!answer) {
+      debugLog("Received undefined or null answer object");
+      return;
+    }
+    
+    // Ensure question exists and is a string
+    const question = (answer.question || "").toString();
+    const htmlId = (answer.html_id || "").toString();
+    const answerValue = (answer.answer !== undefined && answer.answer !== null) 
+                        ? answer.answer 
+                        : "";
+    
+    debugLog(`Processing answer for question: "${question}", value: "${answerValue}"`);
+    
+    // Find the corresponding form element by id or label
+    const elementInfo = formElements.find(el => {
+      // Check for matching ID
+      if (el.id && htmlId && el.id === htmlId) {
+        return true;
+      }
+      
+      // Check for matching label
+      if (el.label && question) {
+        const elLabel = el.label.toString().toLowerCase();
+        const q = question.toLowerCase();
+        if (elLabel.includes(q)) {
+          return true;
+        }
+      }
+      
+      // Check for matching name
+      if (el.name && htmlId && el.name === htmlId) {
+        return true;
+      }
+      
+      return false;
+    });
+    
+    if (!elementInfo) {
+      debugLog(`Could not find element for answer: ${question}`);
+      // Try a more fuzzy match on the question text
+      const fuzzyMatch = formElements.find(el => {
+        if (el.label && question) {
+          const elLabel = el.label.toString().toLowerCase();
+          const q = question.toLowerCase();
+          if (q.includes(elLabel)) {
+            return true;
+          }
+        }
+        
+        if (el.surroundingContext && question) {
+          const context = el.surroundingContext.toString().toLowerCase();
+          const q = question.toLowerCase();
+          if (context.includes(q)) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      if (fuzzyMatch) {
+        debugLog(`Found fuzzy match for answer: "${question}" -> "${fuzzyMatch.label}"`);
+        fillElement(fuzzyMatch, answerValue);
+      } else {
+        debugLog(`No matches found for answer: "${question}"`);
+      }
+      return;
+    }
+    
+    fillElement(elementInfo, answerValue);
+  });
+  
+  // Helper function to fill an element based on its type
+  function fillElement(elementInfo, answerValue) {
+    if (!elementInfo) {
+      debugLog("Cannot fill undefined element");
+      return;
+    }
+    
+    // Convert answerValue to string if it's not already
+    const answer = (answerValue !== undefined && answerValue !== null) ? answerValue : "";
+    
+    debugLog(`Filling element: type=${elementInfo.type}, label="${elementInfo.label || ''}", answer="${answer}"`);
+    
+    // Handle different types of inputs
+    switch (elementInfo.type) {
+      case 'radio_group': // New format from our enhanced parser
+        handleRadioGroup(elementInfo, answer);
+        break;
+        
+      case 'radio-group': // Legacy format for backward compatibility
+        handleRadioGroup(elementInfo, answer);
+        break;
+        
+      case 'checkbox':
+        // Check if answer is truthy
+        const isChecked = answer === true || 
+                         answer === 'true' || 
+                         answer === 'yes' || 
+                         answer === 'checked';
+        elementInfo.element.checked = isChecked;
+        triggerEvent(elementInfo.element, 'change');
+        triggerEvent(elementInfo.element, 'click');
+        break;
+        
+      case 'select-one':
+      case 'select':
+        // Find option with matching value or text
+        const select = elementInfo.element;
+        const options = Array.from(select.options);
+        let matchFound = false;
+        
+        for (let i = 0; i < options.length; i++) {
+          const option = options[i];
+          const optionValue = (option.value || "").toString().toLowerCase();
+          const optionText = (option.text || "").toString().toLowerCase();
+          const answerLower = answer.toString().toLowerCase();
+          
+          if (optionValue === answerLower || 
+              optionValue.includes(answerLower) ||
+              optionText.includes(answerLower) || 
+              answerLower.includes(optionText)) {
+            select.selectedIndex = i;
+            triggerEvent(select, 'change');
+            matchFound = true;
+            break;
+          }
+        }
+        
+        if (!matchFound) {
+          debugLog(`Could not find matching option for select: ${answer}`);
+        }
+        break;
+        
+      default:
+        // Text input, textarea, etc.
+        if (elementInfo.element) {
+          elementInfo.element.value = answer.toString();
+          triggerEvent(elementInfo.element, 'input');
+        } else {
+          debugLog("Element not found for filling text input");
+        }
+        break;
+    }
+  }
+  
+  // Helper function to handle any type of radio group
+  function handleRadioGroup(elementInfo, answerValue) {
+    if (!elementInfo) {
+      debugLog("Cannot handle undefined radio group");
+      return;
+    }
+    
+    // Convert answerValue to string if it's not already
+    const answer = (answerValue !== undefined && answerValue !== null) ? answerValue.toString() : "";
+    
+    debugLog(`Handling radio group: ${elementInfo.label || 'unnamed'} with answer: ${answer}`);
+    
+    // For standard HTML radio buttons
+    if (elementInfo.name && !elementInfo.isAriaGroup && !elementInfo.isCustomGroup) {
+      const radioButtons = document.querySelectorAll(`input[type="radio"][name="${elementInfo.name}"]`);
+      let matched = false;
+      
+      radioButtons.forEach(radio => {
+        const radioValue = (radio.value || "").toString().toLowerCase();
+        const answerLower = answer.toLowerCase();
+        
+        const shouldSelect = radioValue === answerLower || 
+                           radioValue.includes(answerLower) ||
+                           answerLower.includes(radioValue);
+                           
+        if (shouldSelect) {
+          debugLog(`Setting radio button checked: ${radio.value}`);
+          radio.checked = true;
+          triggerEvent(radio, 'change');
+          triggerEvent(radio, 'click');
+          matched = true;
+        }
+      });
+      
+      if (!matched) {
+        debugLog(`No matching radio button found for value: ${answer}`);
+      }
+      return;
+    }
+    
+    // For ARIA-based radio buttons (like Google Forms)
+    if (elementInfo.isAriaGroup) {
+      const options = elementInfo.options || elementInfo.possibleValues || [];
+      let targetOption = null;
+      let targetButton = null;
+      
+      // Find the option that matches the answer
+      for (const option of options) {
+        if (!option) continue;
+        
+        const optionValue = (option.value || "").toString().toLowerCase();
+        const optionText = (option.text || "").toString().toLowerCase();
+        const answerLower = answer.toLowerCase();
+        
+        if (optionValue === answerLower || 
+            optionValue.includes(answerLower) ||
+            optionText.includes(answerLower) || 
+            answerLower.includes(optionText)) {
+          targetOption = option;
+          break;
+        }
+      }
+      
+      if (!targetOption) {
+        debugLog(`No matching option found for ARIA radio group: ${answer}`);
+        return;
+      }
+      
+      // Find the button that corresponds to this option
+      const container = elementInfo.element?.closest('[role="radiogroup"]');
+      if (!container) {
+        debugLog(`Could not find radiogroup container`);
+        return;
+      }
+      
+      const radioButtons = Array.from(container.querySelectorAll('[role="radio"]'));
+      
+      for (const button of radioButtons) {
+        if (!button) continue;
+        
+        const ariaLabel = button.getAttribute('aria-label') || "";
+        const dataValue = button.getAttribute('data-value') || "";
+        const buttonText = ariaLabel || dataValue || button.textContent.trim() || "";
+        const targetText = targetOption.text || "";
+        
+        if (buttonText === targetText || 
+            buttonText.includes(targetText) ||
+            targetText.includes(buttonText)) {
+          targetButton = button;
+          break;
+        }
+      }
+      
+      if (targetButton) {
+        debugLog(`Clicking ARIA radio button: ${targetOption.text}`);
+        
+        // For Google Forms, we need to click the button
+        targetButton.click();
+        
+        // Also set ARIA attributes
+        radioButtons.forEach(btn => {
+          if (!btn) return;
+          btn.setAttribute('aria-checked', btn === targetButton ? 'true' : 'false');
+          if (btn === targetButton) {
+            btn.focus();
+          }
+        });
+        
+        // Dispatch events
+        triggerEvent(targetButton, 'change');
+      } else {
+        debugLog(`Could not find matching ARIA radio button for: ${targetOption.text}`);
+      }
+      return;
+    }
+    
+    // For custom implementations
+    if (elementInfo.isCustomGroup) {
+      const options = elementInfo.options || elementInfo.possibleValues || [];
+      let targetOption = null;
+      
+      // Find the option that matches the answer
+      for (const option of options) {
+        if (!option) continue;
+        
+        const optionValue = (option.value || "").toString().toLowerCase();
+        const optionText = (option.text || "").toString().toLowerCase();
+        const answerLower = answer.toLowerCase();
+        
+        if (optionValue === answerLower || 
+            optionValue.includes(answerLower) ||
+            optionText.includes(answerLower) || 
+            answerLower.includes(optionText)) {
+          targetOption = option;
+          break;
+        }
+      }
+      
+      if (!targetOption) {
+        debugLog(`No matching option found for custom group: ${answer}`);
+        return;
+      }
+      
+      // Try to find the corresponding element to click
+      const container = elementInfo.element;
+      if (!container) {
+        debugLog("Custom group container not found");
+        return;
+      }
+      
+      const elements = container.querySelectorAll('.option, .choice, .radio, li, [role="option"], [role="menuitem"]');
+      
+      let targetElement = null;
+      for (const element of elements) {
+        if (!element) continue;
+        
+        const elementText = element.textContent.trim() || "";
+        const targetText = targetOption.text || "";
+        
+        if (elementText === targetText || 
+            elementText.includes(targetText) ||
+            targetText.includes(elementText)) {
+          targetElement = element;
+          break;
+        }
+      }
+      
+      if (targetElement) {
+        debugLog(`Clicking custom radio option: ${targetOption.text}`);
+        targetElement.click();
+      } else {
+        debugLog(`Could not find matching custom radio element for: ${targetOption.text}`);
+      }
+    }
+  }
+}
+
+// Function to trigger events
+function triggerEvent(element, eventType) {
+  if (!element) {
+    debugLog(`Cannot trigger ${eventType} event on undefined element`);
+    return;
+  }
+  
+  try {
+    const event = new Event(eventType, { bubbles: true, cancelable: true });
+    element.dispatchEvent(event);
+  } catch (error) {
+    debugLog(`Error triggering ${eventType} event: ${error.message}`);
+  }
+}
+
+//-------------------------------------------------------------------
+// Knowledge Base Sync
+//-------------------------------------------------------------------
+
+// Add message listener for knowledge base updates
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "updateKnowledgeBase" && request.knowledgeItems) {
+    debugLog(`Received knowledge base update with ${request.knowledgeItems.length} items`);
+    
+    // Update the localStorage with the new data
+    localStorage.setItem('deiKnowledgeBase', JSON.stringify(request.knowledgeItems));
+    
+    // If we have the knowledge base modal open, refresh it
+    if (document.getElementById('deiKnowledgeModal')) {
+      displayKnowledgeItems();
+    }
+    
+    sendResponse({ success: true });
+  }
+  return true;
+});
+
+// Function to sync knowledge base data from other tabs
+
