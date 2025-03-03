@@ -5,6 +5,7 @@ Werkzeug==2.3.7
 
 # Anthropic
 anthropic
+openai
 
 # LangChain and Dependencies
 langchain>=0.3

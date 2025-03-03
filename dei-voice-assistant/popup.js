@@ -35,6 +35,21 @@ document.addEventListener("DOMContentLoaded", () => {
     updateStatus("Disconnected from server");
   });
 
+  // Listen for stop_audio events from the server
+  socket.on("stop_audio", (data) => {
+    console.log("Stop audio event received:", data);
+    
+    // Stop any playing audio in the popup
+    const audioPlayer = document.getElementById("audioPlayer");
+    if (audioPlayer) {
+      audioPlayer.pause();
+      audioPlayer.currentTime = 0;
+      audioPlayer.style.display = 'none';
+    }
+    
+    updateStatus("Audio playback interrupted");
+  });
+
   // Listen for tool_called events from the server
   socket.on("tool_called", (data) => {
     console.log("Tool called event received:", data);
@@ -119,9 +134,32 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Listen for messages from the content script or background script
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log("Message received in popup:", request);
+    console.log("Popup received message:", request);
     
-    // Handle different message types
+    // Handle text-to-speech request from background
+    if (request.action === "convertToSpeech" && request.data?.text) {
+      console.log("Converting text to speech from page request");
+      
+      // Indicate that processing has started
+      updateStatus("Processing speech request...");
+      
+      textToSpeech(request.data.text)
+        .then(audioBlob => {
+          // Auto-play the audio immediately
+          playAudio(audioBlob);
+          sendResponse({ status: "success", message: "Audio playback started automatically" });
+        })
+        .catch(error => {
+          console.error("Error converting to speech:", error);
+          updateStatus("Speech conversion failed: " + error.message);
+          sendResponse({ status: "error", message: error.toString() });
+        });
+      
+      // Return true to indicate we'll respond asynchronously
+      return true;
+    }
+    
+    // Handle summarizeResult messages
     if (request.action === "summarizeResult") {
       // Display the summary result in the popup
       if (summaryEl) {
@@ -150,8 +188,38 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Function to stop any playing audio on the page
+  function stopAudioPlayback() {
+    // Stop audio in the popup
+    const audioPlayer = document.getElementById("audioPlayer");
+    if (audioPlayer) {
+      audioPlayer.pause();
+      audioPlayer.currentTime = 0;
+      audioPlayer.style.display = 'none';
+    }
+    
+    // Tell the backend to stop any active TTS processes
+    fetch("http://127.0.0.1:5001/stop_audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+    .then(response => {
+      console.log("Audio stop request sent to backend");
+    })
+    .catch(error => {
+      console.error("Error sending stop audio request:", error);
+    });
+    
+    updateStatus("Audio playback stopped");
+  }
+
+  // Start recording audio
   async function startRecording() {
     try {
+      // Stop any playing audio first
+      stopAudioPlayback();
+      
+      // Get the audio stream
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
@@ -264,43 +332,34 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Test function to manually test the tool selection
-  window.testTool = function(toolName) {
+  function testTool(toolName) {
+    if (!toolName) return;
+    
+    console.log(`Testing ${toolName} tool...`);
+    
     fetch(`http://127.0.0.1:5001/test-socket?tool=${toolName}`, {
-      method: "POST"
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
     })
     .then(response => response.json())
     .then(data => {
-      console.log("Test tool response:", data);
-      updateStatus(`Test tool request sent: ${toolName}`);
+      console.log(`Test request sent: ${data.message}`);
     })
     .catch(error => {
-      console.error("Error testing tool:", error);
-      updateStatus("Error testing tool");
+      console.error(`Test request failed: ${error}`);
     });
-  };
+  }
 
-  recordBtn.addEventListener("click", async () => {
-    if (isRecording) {
-      stopRecording();
+  // Add the test function to the window object for console access
+  window.testTool = testTool;
+
+  recordBtn.addEventListener("click", () => {
+    if (!isRecording) {
+      startRecording();
     } else {
-      await startRecording();
+      stopRecording();
     }
   });
-  
-  // Add test buttons if in development mode
-  if (true) { // Change to a config variable if needed
-    const testPanel = document.createElement('div');
-    testPanel.className = 'test-panel';
-    testPanel.innerHTML = `
-      <h3>Test Tools</h3>
-      <div class="test-buttons">
-        <button onclick="testTool('summarize')">Test Summarize</button>
-        <button onclick="testTool('find')">Test Find</button>
-        <button onclick="testTool('extract_entities')">Test Entities</button>
-      </div>
-    `;
-    document.body.appendChild(testPanel);
-  }
 
   // Function to extract page content directly using executeScript
   function extractPageContent() {
@@ -387,8 +446,23 @@ document.addEventListener("DOMContentLoaded", () => {
           throw new Error("API did not return a summary");
         }
         
-        // Inject the summary into the page for display
-        injectSummaryIntoPage(data.summary);
+        // Display summary in popup only (no page injection)
+        if (summaryEl) {
+          summaryEl.innerText = data.summary;
+          summaryEl.style.display = "block";
+        }
+        
+        // Convert summary to speech
+        textToSpeech(data.summary)
+          .then(audioBlob => {
+            console.log("Text-to-speech conversion successful");
+            // Play the audio
+            playAudio(audioBlob);
+          })
+          .catch(error => {
+            console.error("Text-to-speech error:", error);
+            updateStatus("Error converting text to speech");
+          });
         
         // Return the summary for popup display
         resolve(data.summary);
@@ -400,95 +474,113 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Function to inject and display the summary in the current page
-  function injectSummaryIntoPage(summary) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || !tabs[0]) {
-        console.error("No active tab found for displaying summary");
-        return;
-      }
+  // Function to convert text to speech using the backend API
+  function textToSpeech(text) {
+    return new Promise((resolve, reject) => {
+      updateStatus("Converting summary to speech...");
       
-      chrome.scripting.executeScript({
-        target: { tabId: tabs[0].id },
-        args: [summary],
-        function: (summaryText) => {
-          try {
-            // Check if summary container already exists
-            let summaryContainer = document.getElementById('dei-summary-container');
-            
-            if (!summaryContainer) {
-              // Create the summary container
-              summaryContainer = document.createElement('div');
-              summaryContainer.id = 'dei-summary-container';
-              summaryContainer.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                width: 300px;
-                max-height: 400px;
-                background-color: #fff;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                padding: 15px;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-                z-index: 10000;
-                overflow-y: auto;
-                font-family: Arial, sans-serif;
-              `;
-              
-              // Create the summary header
-              const header = document.createElement('div');
-              header.style.cssText = `
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 10px;
-                border-bottom: 1px solid #eee;
-                padding-bottom: 10px;
-              `;
-              
-              const title = document.createElement('h3');
-              title.textContent = 'Page Summary';
-              title.style.margin = '0';
-              
-              const closeButton = document.createElement('button');
-              closeButton.innerHTML = '&times;';
-              closeButton.style.cssText = `
-                background: none;
-                border: none;
-                font-size: 20px;
-                cursor: pointer;
-              `;
-              closeButton.onclick = () => {
-                document.body.removeChild(summaryContainer);
-              };
-              
-              header.appendChild(title);
-              header.appendChild(closeButton);
-              summaryContainer.appendChild(header);
-              
-              // Create the content area
-              const content = document.createElement('div');
-              content.id = 'dei-summary-content';
-              summaryContainer.appendChild(content);
-              
-              // Add to the page
-              document.body.appendChild(summaryContainer);
-            }
-            
-            // Update the summary content
-            const contentArea = document.getElementById('dei-summary-content');
-            if (contentArea) {
-              contentArea.textContent = summaryText;
-            }
-            
-            return true;
-          } catch (error) {
-            console.error("Error displaying summary:", error);
-            return false;
-          }
+      // Create an abort controller for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      fetch("http://127.0.0.1:5001/text_to_speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          text: text,
+          voice: "alloy" // OpenAI voice option: alloy, echo, fable, onyx, nova, or shimmer
+        }),
+        signal: controller.signal
+      })
+      .then(response => {
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+        
+        // The response should be audio data
+        return response.blob();
+      })
+      .then(audioBlob => {
+        console.log("Received audio blob, size:", audioBlob.size);
+        updateStatus("Speech ready - playing now");
+        
+        // Immediately play the audio without requiring user interaction
+        resolve(audioBlob);
+      })
+      .catch(error => {
+        console.error("Error in textToSpeech:", error);
+        reject(error);
       });
     });
+  }
+
+  // Function to play audio from a blob
+  function playAudio(audioBlob) {
+    // Create audio URL from the blob
+    const audioUrl = URL.createObjectURL(audioBlob);
+    
+    // Get or create audio element
+    let audioPlayer = document.getElementById('audioPlayer');
+    if (!audioPlayer) {
+      audioPlayer = document.createElement('audio');
+      audioPlayer.id = 'audioPlayer';
+      // Never show controls
+      audioPlayer.controls = false;
+      audioPlayer.style.display = 'none';
+      document.body.appendChild(audioPlayer);
+    }
+    
+    // Add event handling for interruptions
+    const handleRecordClick = () => {
+      // Clean up URL when recording starts
+      URL.revokeObjectURL(audioUrl);
+      audioPlayer.removeEventListener('ended', handleEnded);
+      audioPlayer.pause();
+      audioPlayer.currentTime = 0;
+    };
+    
+    // Add the event listener to the record button
+    const recordBtn = document.getElementById('recordBtn');
+    if (recordBtn) {
+      recordBtn.addEventListener('click', handleRecordClick, { once: true });
+    }
+    
+    // Handle completion
+    const handleEnded = () => {
+      URL.revokeObjectURL(audioUrl);
+      updateStatus("Summary complete");
+      // Remove the record button event listener since it's no longer needed
+      if (recordBtn) {
+        recordBtn.removeEventListener('click', handleRecordClick);
+      }
+    };
+    
+    // Set the audio source and play
+    audioPlayer.src = audioUrl;
+    
+    // Show visual feedback that audio is playing without showing controls
+    updateStatus("Playing summary audio...");
+    
+    // Auto-play
+    audioPlayer.play()
+      .then(() => {
+        console.log("Audio playback started automatically");
+      })
+      .catch(error => {
+        console.error("Audio playback error:", error);
+        
+        // Even if autoplay fails, don't show controls
+        updateStatus("Error playing audio: " + error.message);
+        
+        URL.revokeObjectURL(audioUrl);
+        if (recordBtn) {
+          recordBtn.removeEventListener('click', handleRecordClick);
+        }
+      });
+    
+    // Set up event for when playback ends
+    audioPlayer.onended = handleEnded;
   }
 });

@@ -1,8 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import anthropic
 from consts import prompt
 import os
+import io
+import time
 import dotenv
 from langchain.tools import tool
 from langchain_anthropic import ChatAnthropic
@@ -10,6 +12,7 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from flask_socketio import SocketIO, send
 import json
+import openai
 
 dotenv.load_dotenv()
 
@@ -25,6 +28,15 @@ socketio = SocketIO(app,
 
 # Debug flag to show all events
 DEBUG = True
+
+# Initialize OpenAI client
+openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Cache for storing generated audio to avoid redundant API calls
+tts_cache = {}
+
+# Add global variable to track TTS tasks
+tts_active = False
 
 # Define available tools
 AVAILABLE_TOOLS = [
@@ -49,6 +61,22 @@ AVAILABLE_TOOLS = [
         "description": "Translate the text to another language"
     }
 ]
+# Additional Socket.io event handlers
+@socketio.on("connect")
+def handle_connect():
+    print("Client connected to Socket.io server")
+    # Send a welcome message to confirm connection
+    socketio.emit('welcome', {'message': 'Connected to DEI Voice Assistant backend'})
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    print("Client disconnected from Socket.io server")
+
+@socketio.on("message") 
+def handle_message(msg):
+    print(f"Received Socket.io message: {msg}")
+    # Echo the message back as confirmation
+    socketio.emit('message', f"Server received: {msg}")
 
 # Setup logging function
 def log_debug(message):
@@ -312,23 +340,6 @@ def summarize():
             'success': False
         }), 500
 
-# Additional Socket.io event handlers
-@socketio.on("connect")
-def handle_connect():
-    print("Client connected to Socket.io server")
-    # Send a welcome message to confirm connection
-    socketio.emit('welcome', {'message': 'Connected to DEI Voice Assistant backend'})
-
-@socketio.on("disconnect")
-def handle_disconnect():
-    print("Client disconnected from Socket.io server")
-
-@socketio.on("message") 
-def handle_message(msg):
-    print(f"Received Socket.io message: {msg}")
-    # Echo the message back as confirmation
-    socketio.emit('message', f"Server received: {msg}")
-
 @app.route('/execute-tool', methods=['POST'])
 def execute_tool_route():
     """
@@ -531,6 +542,171 @@ def debug_console():
     """
     
     return html
+
+@app.route('/stop_audio', methods=['POST'])
+def stop_audio():
+    """
+    Endpoint to stop any active text-to-speech processes
+    
+    This endpoint is called when a recording starts to ensure TTS doesn't
+    interfere with speech recording.
+    
+    Returns a JSON response indicating success
+    """
+    global tts_active
+    
+    log_debug("Stop audio request received")
+    
+    # Set the flag to indicate TTS should be stopped
+    tts_active = False
+    
+    # Send a socket event to notify clients that audio should stop
+    socketio.emit('stop_audio', {
+        'message': 'Audio playback interrupted by recording'
+    })
+    
+    return jsonify({
+        "success": True,
+        "message": "Audio playback stopped"
+    })
+
+@app.route('/text_to_speech', methods=['POST'])
+def text_to_speech():
+    """
+    Endpoint to convert text to speech using OpenAI's API
+    
+    Expected JSON payload:
+    {
+        "text": "Text to convert to speech",
+        "voice": "alloy"  # Optional: can be alloy, echo, fable, onyx, nova, or shimmer
+    }
+    
+    Returns audio file in MP3 format
+    """
+    global tts_active
+    
+    try:
+        # Set the active flag to indicate TTS is in progress
+        tts_active = True
+        
+        # Get request data
+        data = request.json
+        
+        if not data or 'text' not in data:
+            return jsonify({"error": "Missing required 'text' field"}), 400
+        
+        text = data['text']
+        log_debug(f"Text-to-speech request received with {len(text)} characters")
+        
+        # If audio was stopped before processing, return early
+        if not tts_active:
+            log_debug("TTS request cancelled due to interruption")
+            return jsonify({
+                "success": False,
+                "error": "TTS request cancelled due to user interruption"
+            }), 200
+            
+        # Limit text length to avoid excessive API usage
+        if len(text) > 4096:
+            text = text[:4096]
+            log_debug(f"Text truncated to 4096 characters")
+            
+        # Optional voice parameter (defaults to 'alloy')
+        voice = data.get('voice', 'alloy')
+        
+        # Valid voice options for OpenAI
+        valid_voices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
+        if voice not in valid_voices:
+            voice = 'alloy'
+        
+        # Generate a cache key from the text and voice
+        cache_key = f"{voice}:{text}"
+        
+        # Check if we already have this audio in cache
+        if cache_key in tts_cache:
+            log_debug(f"Using cached audio for TTS request")
+            audio_data = tts_cache[cache_key]['data']
+            
+            # Reset the active flag before returning
+            tts_active = False
+            
+            # Return the cached audio
+            return send_file(
+                io.BytesIO(audio_data),
+                mimetype="audio/mpeg",
+                as_attachment=True,
+                download_name=f"tts_{int(time.time())}.mp3"
+            )
+        
+        # If not in cache, call OpenAI API
+        log_debug(f"Generating new speech with OpenAI API using voice: {voice}")
+        
+        # Check if OpenAI API key is available
+        if not os.getenv("OPENAI_API_KEY"):
+            tts_active = False
+            return jsonify({"error": "OpenAI API key not configured"}), 500
+        
+        # Verify TTS hasn't been interrupted
+        if not tts_active:
+            log_debug("TTS request cancelled during API preparation")
+            return jsonify({
+                "success": False,
+                "error": "TTS request cancelled due to user interruption"
+            }), 200
+        
+        try:
+            response = openai_client.audio.speech.create(
+                model="tts-1",
+                voice=voice,
+                input=text
+            )
+            
+            # Check for interruption after API call
+            if not tts_active:
+                log_debug("TTS request cancelled after API call")
+                return jsonify({
+                    "success": False,
+                    "error": "TTS request cancelled due to user interruption"
+                }), 200
+            
+            # Get the audio content
+            audio_data = response.content
+            
+            # Store in cache (with simple expiration)
+            tts_cache[cache_key] = {
+                'data': audio_data,
+                'timestamp': time.time()
+            }
+            
+            # Clear old cache entries (older than 1 hour)
+            current_time = time.time()
+            keys_to_remove = [k for k, v in tts_cache.items() 
+                            if current_time - v['timestamp'] > 3600]
+            for k in keys_to_remove:
+                del tts_cache[k]
+            
+            log_debug(f"Text-to-speech conversion successful, returning audio file")
+            
+            # Reset the active flag before returning
+            tts_active = False
+            
+            # Return the audio
+            return send_file(
+                io.BytesIO(audio_data),
+                mimetype="audio/mpeg",
+                as_attachment=True,
+                download_name=f"tts_{int(time.time())}.mp3"
+            )
+            
+        except Exception as e:
+            log_debug(f"OpenAI API error: {str(e)}")
+            tts_active = False
+            return jsonify({"error": f"OpenAI API error: {str(e)}"}), 500
+        
+    except Exception as e:
+        log_debug(f"Error in text_to_speech: {str(e)}")
+        tts_active = False
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     print("Starting DEI Voice Assistant backend server...")
