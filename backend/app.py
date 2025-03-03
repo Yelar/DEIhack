@@ -1168,6 +1168,120 @@ IMPORTANT:
         app.logger.error(f"Error generating form answers: {str(e)}")
         return []
 
+@app.route('/navigation-chrome', methods=['POST'])
+def navigation_chrome():
+    """
+    Endpoint to process HTML content and transcript to generate navigation commands.
+    
+    Expected JSON payload:
+    {
+        "html_content": "HTML content of the page",
+        "transcript": "User's voice transcript"
+    }
+    
+    Returns:
+    {
+        "status": "success" | "error",
+        "commands": [
+            {
+                "type": "click" | "scroll" | "focus" | "navigate",
+                "target": "selector or description",
+                "confidence": float,
+                "explanation": "Why this action was chosen"
+            }
+        ],
+        "message": "Optional error or success message"
+    }
+    """
+    try:
+        if DEBUG:
+            app.logger.info("Received request to /navigation-chrome endpoint")
+        
+        if not request.is_json:
+            return jsonify({
+                'status': 'error',
+                'message': 'Request must contain JSON data'
+            }), 400
+            
+        data = request.json
+        html_content = data.get('html_content')
+        transcript = data.get('transcript')
+        
+        if not html_content or not transcript:
+            return jsonify({
+                'status': 'error',
+                'message': 'Both html_content and transcript are required'
+            }), 400
+            
+        if DEBUG:
+            app.logger.info(f"Processing navigation request with transcript: {transcript}")
+            
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        # Prepare the prompt for Claude
+        prompt = f"""
+        Based on the HTML content and user's voice transcript below, determine the appropriate navigation commands.
+        Focus on identifying clickable elements, form inputs, or areas that match the user's intent.
+        
+        Return ONLY a JSON array of commands, where each command has:
+        - "type": "click" | "scroll" | "focus" | "navigate"
+        - "target": CSS selector or descriptive target
+        - "confidence": 0.0 to 1.0 indicating confidence in the command
+        - "explanation": Brief explanation of why this action was chosen
+        
+        HTML Content:
+        {html_content}
+        
+        User Transcript:
+        {transcript}
+        
+        Respond ONLY with the JSON array. No other text or explanation.
+        """
+        
+        try:
+            response = client.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=1000,
+                temperature=0.0,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            # Parse the response as JSON
+            try:
+                commands = json.loads(response.content[0].text)
+                
+                if DEBUG:
+                    app.logger.info(f"Generated navigation commands: {commands}")
+                    
+                return jsonify({
+                    'status': 'success',
+                    'commands': commands
+                })
+                
+            except json.JSONDecodeError as e:
+                app.logger.error(f"Error parsing Claude response as JSON: {str(e)}")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Failed to parse navigation commands',
+                    'raw_response': response.content[0].text
+                }), 500
+                
+        except Exception as e:
+            app.logger.error(f"Error from Claude API: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Claude API error: {str(e)}'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error in navigation-chrome endpoint: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
 if __name__ == '__main__':
     print("Starting DEI Voice Assistant backend server...")
     print(f"Debug mode: {'ON' if DEBUG else 'OFF'}")

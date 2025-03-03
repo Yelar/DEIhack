@@ -186,12 +186,6 @@ function createExplainButton() {
       action: activateSummarizeMode
     },
     {
-      id: 'dei-talk-option',
-      icon: '🎙️',
-      tooltip: 'Voice Assistant',
-      action: activateTalkMode
-    },
-    {
       id: 'dei-knowledge-option',
       icon: '📚',
       tooltip: 'Knowledge Base',
@@ -510,6 +504,16 @@ function createExplainButton() {
     toggleTranscriptModal();
   }
   
+  function activateVoiceNavMode() {
+    debugLog("Voice navigation mode activated");
+    
+    // Close the menu
+    toggleMenu();
+    
+    // Open voice navigation directly
+    openVoiceNav();
+  }
+  
   function activateKnowledgeMode() {
     debugLog("Knowledge base mode activated");
     
@@ -574,7 +578,326 @@ function createExplainButton() {
       if (callback) callback();
     }, 2000);
   }
+
+
+// Voice navigation modal reference
+let voiceNavModal = null;
+
+// Function to open voice navigation modal
+function openVoiceNav() {
+  debugLog("Opening voice navigation modal");
   
+  // Create voice nav modal if it doesn't exist
+  if (!voiceNavModal) {
+    createVoiceNavModal();
+  }
+  
+  // If modal is not visible, position it near the Voice Nav button
+  if (voiceNavModal.style.display !== 'flex') {
+    const voiceNavButton = document.getElementById('dei-voice-nav-option');
+    if (voiceNavButton) {
+      const rect = voiceNavButton.getBoundingClientRect();
+      voiceNavModal.style.left = `${rect.left - 150}px`; // Center aligned with button
+      voiceNavModal.style.top = `${rect.top - 100}px`; // Position above the button
+    } else {
+      // Default position if button not found
+      voiceNavModal.style.left = '50%';
+      voiceNavModal.style.top = '50%';
+      voiceNavModal.style.transform = 'translate(-50%, -50%)';
+    }
+    
+    // Show the modal
+    voiceNavModal.style.display = 'flex';
+    
+    // Focus the input field
+    const inputField = document.querySelector(".dei-nav-input");
+    if (inputField) {
+      inputField.focus();
+    }
+  }
+}
+
+
+  // Function to create voice navigation modal
+function createVoiceNavModal() {
+  debugLog("Creating voice navigation modal");
+  
+  // Create modal container
+  voiceNavModal = document.createElement('div');
+  voiceNavModal.id = 'dei-voice-nav-modal';
+  voiceNavModal.style.cssText = `
+    position: fixed;
+    background-color: ${DEI_THEME.dark.card};
+    border-radius: ${DEI_THEME.dark.radius};
+    border: 1px solid ${DEI_THEME.dark.border};
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    padding: 12px;
+    z-index: 9997;
+    width: 300px;
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-family: ${DEI_THEME.dark.fontPrimary};
+    color: ${DEI_THEME.dark.foreground};
+    transition: all 0.2s ease;
+  `;
+  
+  // Create input field
+  const inputField = document.createElement('input');
+  inputField.className = 'dei-nav-input';
+  inputField.type = 'text';
+  inputField.placeholder = 'Enter navigation command...';
+  inputField.style.cssText = `
+    flex: 1;
+    font-size: 14px;
+    padding: 8px 12px;
+    background-color: ${DEI_THEME.dark.background};
+    color: ${DEI_THEME.dark.foreground};
+    border: 1px solid ${DEI_THEME.dark.border};
+    border-radius: ${DEI_THEME.dark.radius};
+    outline: none;
+  `;
+  
+  // Create voice button
+  const voiceButton = document.createElement('button');
+  voiceButton.className = 'dei-nav-voice-button';
+  voiceButton.innerHTML = '🎙️';
+  voiceButton.title = 'Voice Input';
+  voiceButton.style.cssText = `
+    background-color: ${DEI_THEME.dark.primary};
+    color: ${DEI_THEME.dark.foreground};
+    border: none;
+    border-radius: ${DEI_THEME.dark.radius};
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  `;
+  
+  // Add recording indicator
+  const recordingIndicator = document.createElement('div');
+  recordingIndicator.className = 'dei-nav-recording-indicator';
+  recordingIndicator.style.cssText = `
+    display: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: red;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    animation: pulse 1.5s infinite ease-in-out;
+  `;
+  
+  // Create send button
+  const sendButton = document.createElement('button');
+  sendButton.className = 'dei-nav-send-button';
+  sendButton.innerHTML = '↑';
+  sendButton.title = 'Send Command';
+  sendButton.style.cssText = `
+    background-color: ${DEI_THEME.dark.accent};
+    color: ${DEI_THEME.dark.foreground};
+    border: none;
+    border-radius: ${DEI_THEME.dark.radius};
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  `;
+  
+  // Add voice button functionality
+  let isRecordingNav = false;
+  voiceButton.addEventListener('click', () => {
+    if (!isRecordingNav) {
+      startNavRecording();
+      voiceButton.innerHTML = '■';
+      voiceButton.title = 'Stop Recording';
+      voiceButton.style.backgroundColor = '#dc3545'; // Red for recording
+      recordingIndicator.style.display = 'block';
+    } else {
+      stopNavRecording();
+      voiceButton.innerHTML = '🎙️';
+      voiceButton.title = 'Voice Input';
+      voiceButton.style.backgroundColor = DEI_THEME.dark.primary;
+      recordingIndicator.style.display = 'none';
+    }
+  });
+  
+  // Add send button functionality
+  sendButton.addEventListener('click', async () => {
+    const text = inputField.value.trim();
+    if (text) {
+      await processNavCommand(text);
+      inputField.value = '';
+    }
+  });
+  
+  // Allow Enter key to send command
+  inputField.addEventListener('keypress', async (e) => {
+    if (e.key === 'Enter' && inputField.value.trim()) {
+      const text = inputField.value.trim();
+      await processNavCommand(text);
+      inputField.value = '';
+    }
+  });
+  
+  // Add elements to modal
+  voiceButton.appendChild(recordingIndicator);
+  voiceNavModal.appendChild(inputField);
+  voiceNavModal.appendChild(voiceButton);
+  voiceNavModal.appendChild(sendButton);
+  
+  // Make modal draggable
+  let isDraggingNavModal = false;
+  let navModalOffsetX, navModalOffsetY;
+  
+  voiceNavModal.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // Only left mouse button
+    isDraggingNavModal = true;
+    
+    const rect = voiceNavModal.getBoundingClientRect();
+    navModalOffsetX = e.clientX - rect.left;
+    navModalOffsetY = e.clientY - rect.top;
+    
+    // Prevent default to avoid text selection during drag
+    e.preventDefault();
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDraggingNavModal) return;
+    
+    // Update position
+    const x = e.clientX - navModalOffsetX;
+    const y = e.clientY - navModalOffsetY;
+    
+    // Keep within viewport bounds
+    const maxX = window.innerWidth - voiceNavModal.offsetWidth;
+    const maxY = window.innerHeight - voiceNavModal.offsetHeight;
+    
+    voiceNavModal.style.left = `${Math.min(Math.max(0, x), maxX)}px`;
+    voiceNavModal.style.top = `${Math.min(Math.max(0, y), maxY)}px`;
+  });
+  
+  document.addEventListener('mouseup', () => {
+    isDraggingNavModal = false;
+  });
+  
+  document.body.appendChild(voiceNavModal);
+  debugLog("Voice navigation modal created");
+}
+
+// Voice navigation recording variables
+let navRecognition = null;
+let isRecordingNav = false;
+
+// Function to start voice recording for navigation
+function startNavRecording() {
+  debugLog("Starting voice recording for navigation");
+  
+  isRecordingNav = true;
+  
+  // Check if the browser supports speech recognition
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    alert('Your browser does not support speech recognition. Please try Chrome or Edge.');
+    return;
+  }
+  
+  // Create speech recognition instance
+  navRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  navRecognition.continuous = true;
+  navRecognition.interimResults = true;
+  navRecognition.lang = 'en-US';
+  
+  // Get input field
+  const inputField = document.querySelector(".dei-nav-input");
+  
+  // Handle results
+  navRecognition.onresult = (event) => {
+    let interimTranscript = '';
+    let finalTranscript = '';
+    
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript;
+      } else {
+        interimTranscript += transcript;
+      }
+    }
+    
+    // Update input field with transcribed text
+    if (inputField) {
+      inputField.value = finalTranscript || interimTranscript;
+    }
+  };
+  
+  // Handle errors
+  navRecognition.onerror = (event) => {
+    debugLog("Speech recognition error:", event.error);
+    stopNavRecording();
+  };
+  
+  // Start recording
+  navRecognition.start();
+}
+
+// Function to stop voice recording for navigation
+function stopNavRecording() {
+  debugLog("Stopping voice recording for navigation");
+  
+  isRecordingNav = false;
+  
+  if (navRecognition) {
+    navRecognition.stop();
+    navRecognition = null;
+  }
+}
+
+
+// Function to process navigation command
+async function processNavCommand(text) {
+  debugLog("Processing navigation command:", text);
+  
+  try {
+    // Get page content
+    const pageContent = await extractPageContent();
+    
+    // Send to navigation endpoint
+    const response = await fetch("http://127.0.0.1:5001/navigation-chrome", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transcript: text,
+        html_content: pageContent,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.status === "success" && data.commands) {
+      // Execute the navigation commands
+      await executeNavigationCommands(data.commands);
+      
+      // Show success toast
+      showToast("Executing navigation commands...", 2000);
+    } else {
+      showToast("No navigation commands found", 2000);
+    }
+  } catch (error) {
+    console.error("Navigation error:", error);
+    showToast("Error processing navigation command", 2000);
+  }
+}
+
   function extractPageContent() {
     // Get main text content from the page
     let content = '';
@@ -664,7 +987,7 @@ function createExplainButton() {
     justify-content: center;
     z-index: 10000;
     font-family: ${DEI_THEME.dark.fontPrimary};
-    backdrop-filter: blur(4px);
+    backdrop-filter: none;
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   `;
   
@@ -1003,7 +1326,7 @@ function setupContextMenu() {
         box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
         padding: 8px 0;
         min-width: 180px;
-        backdrop-filter: blur(8px);
+        backdrop-filter: none;
         animation: menuFadeIn 0.2s ease-out forwards;
       `;
       
@@ -1120,7 +1443,7 @@ function startScreenshotSelection(e) {
     background-color: rgba(9, 9, 11, 0.3);
     z-index: 9998;
     cursor: crosshair;
-    backdrop-filter: blur(2px);
+    backdrop-filter: none;
     transition: background-color 0.2s ease;
   `;
   document.body.appendChild(overlay);
@@ -2670,7 +2993,7 @@ function createKnowledgeBaseModal() {
     justify-content: center;
     z-index: 10000;
     font-family: ${DEI_THEME.dark.fontPrimary};
-    backdrop-filter: blur(4px);
+    backdrop-filter: none;
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   `;
   
@@ -4413,3 +4736,109 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Function to sync knowledge base data from other tabs
 
+
+
+
+async function executeNavigationCommands(commands) {
+  debugLog("Executing navigation commands:", commands);
+
+  for (const command of commands) {
+    try {
+      switch (command.type) {
+        case "click":
+          await executeClickCommand(command);
+          break;
+        case "scroll":
+          await executeScrollCommand(command);
+          break;
+        case "focus":
+          await executeFocusCommand(command);
+          break;
+        case "navigate":
+          await executeNavigateCommand(command);
+          break;
+        default:
+          debugLog(`Unknown command type: ${command.type}`);
+      }
+    } catch (error) {
+      debugLog(`Error executing command: ${error.message}`);
+    }
+  }
+}
+
+async function executeClickCommand(command) {
+  const element = findTargetElement(command.target);
+  if (element) {
+    // Highlight the element briefly before clicking
+    element.style.outline = "2px solid #8A2BE2";
+    element.style.outlineOffset = "2px";
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Click the element
+    element.click();
+
+    // Remove highlight
+    setTimeout(() => {
+      element.style.outline = "";
+      element.style.outlineOffset = "";
+    }, 500);
+  }
+}
+
+async function executeScrollCommand(command) {
+  const element = findTargetElement(command.target);
+  if (element) {
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Highlight the scrolled area
+    element.style.outline = "2px solid #8A2BE2";
+    element.style.outlineOffset = "2px";
+    setTimeout(() => {
+      element.style.outline = "";
+      element.style.outlineOffset = "";
+    }, 1000);
+  }
+}
+
+async function executeFocusCommand(command) {
+  const element = findTargetElement(command.target);
+  if (element) {
+    element.focus();
+
+    // Highlight the focused element
+    element.style.outline = "2px solid #8A2BE2";
+    element.style.outlineOffset = "2px";
+    setTimeout(() => {
+      element.style.outline = "";
+      element.style.outlineOffset = "";
+    }, 1000);
+  }
+}
+
+async function executeNavigateCommand(command) {
+  if (command.target.startsWith("http")) {
+    window.location.href = command.target;
+  } else {
+    debugLog(`Invalid navigation URL: ${command.target}`);
+  }
+}
+
+function findTargetElement(target) {
+  // Try direct CSS selector first
+  let element = document.querySelector(target);
+
+  if (!element) {
+    // Try finding by text content
+    const elements = document.querySelectorAll("*");
+    element = Array.from(elements).find(
+      (el) => el.textContent?.trim().toLowerCase() === target.toLowerCase()
+    );
+  }
+
+  if (!element) {
+    debugLog(`Element not found: ${target}`);
+    return null;
+  }
+
+  return element;
+}
