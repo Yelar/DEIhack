@@ -182,7 +182,7 @@ function createExplainButton() {
     {
       id: 'dei-summarize-option',
       icon: '📝',
-      tooltip: 'Summarize Selection',
+      tooltip: 'Summarize Page',
       action: activateSummarizeMode
     },
     {
@@ -373,11 +373,126 @@ function createExplainButton() {
   
   function activateSummarizeMode() {
     debugLog("Summarize mode activated");
-    if (window.getSelection().toString().trim()) {
-      summarizeSelectedText(window.getSelection().toString());
-    } else {
-      showToast("Please select some text to summarize first", 2000);
-    }
+    
+    // Close the menu first
+    toggleMenu();
+    
+    // Show instructions toast
+    showToast('Analyzing page content for summarization...');
+    
+    // Show the scanning animation and then process the page
+    showPageScanAnimation(() => {
+      // Extract the page content
+      const pageContent = extractPageContent();
+      
+      // Show processing toast
+      showToast('Generating summary. This may take a moment...');
+      
+      // Send the page content to be summarized
+      summarizePageContent(pageContent)
+        .then(summary => {
+          // Create a modal to display the summary
+          const modalId = 'deiSummaryModal';
+          let modal = document.getElementById(modalId);
+          
+          // If modal doesn't exist, create it
+          if (!modal) {
+            modal = document.createElement('div');
+            modal.id = modalId;
+            modal.className = 'dei-modal';
+            modal.innerHTML = `
+              <div class="dei-modal-content">
+                <div class="dei-modal-header">
+                  <h2>Page Summary</h2>
+                  <span class="dei-close-button">&times;</span>
+                </div>
+                <div class="dei-modal-body">
+                  <div id="summaryContent" class="dei-summary-content"></div>
+                </div>
+                <div class="dei-modal-footer">
+                  <button id="copySummaryBtn" class="dei-button">Copy to Clipboard</button>
+                  <button id="readSummaryBtn" class="dei-button">Read Aloud</button>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Add event listeners for modal buttons
+            modal.querySelector('.dei-close-button').addEventListener('click', () => {
+              modal.style.display = 'none';
+            });
+            
+            // Copy to clipboard functionality
+            modal.querySelector('#copySummaryBtn').addEventListener('click', () => {
+              const summaryText = modal.querySelector('#summaryContent').textContent;
+              navigator.clipboard.writeText(summaryText)
+                .then(() => {
+                  showToast('Summary copied to clipboard', 2000);
+                })
+                .catch(err => {
+                  console.error('Could not copy text: ', err);
+                  showToast('Failed to copy to clipboard', 2000);
+                });
+            });
+            
+            // Read aloud functionality
+            modal.querySelector('#readSummaryBtn').addEventListener('click', () => {
+              const summaryText = modal.querySelector('#summaryContent').textContent;
+              handleReadAloud(summaryText);
+            });
+            
+            // Close modal when clicking outside
+            window.addEventListener('click', (event) => {
+              if (event.target === modal) {
+                modal.style.display = 'none';
+              }
+            });
+            
+            // Escape key to close modal
+            document.addEventListener('keydown', (event) => {
+              if (event.key === 'Escape' && modal.style.display === 'block') {
+                modal.style.display = 'none';
+              }
+            });
+          }
+          
+          // Update the summary content
+          const summaryContent = modal.querySelector('#summaryContent');
+          
+          // Format the summary with markdown-like styling
+          let formattedSummary = summary;
+          
+          // Simple markdown parser for basic formatting
+          formattedSummary = formattedSummary
+            // Bold text
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            // Italic text
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            // Headers
+            .replace(/^# (.*?)$/gm, '<h1>$1</h1>')
+            .replace(/^## (.*?)$/gm, '<h2>$1</h2>')
+            .replace(/^### (.*?)$/gm, '<h3>$1</h3>')
+            // Bullet points
+            .replace(/^- (.*?)$/gm, '<li>$1</li>')
+            // Numbered lists
+            .replace(/^\d+\. (.*?)$/gm, '<li>$1</li>')
+            // Convert line breaks to paragraphs
+            .split('\n\n').map(para => `<p>${para}</p>`).join('');
+          
+          // Apply the formatted summary
+          summaryContent.innerHTML = formattedSummary;
+          
+          // Display the modal
+          modal.style.display = 'block';
+          
+          // Show success toast
+          showToast('Summary generated successfully', 2000);
+        })
+        .catch(error => {
+          console.error('Error generating summary:', error);
+          showToast('Error generating summary: ' + error.message, 3000);
+        });
+    });
   }
   
   function activateTalkMode() {
