@@ -4,6 +4,15 @@ console.log('DEI Voice Assistant content script loaded');
 
 const DEBUG = true;  // Enable debugging
 
+// Variables for recording functionality
+let mediaRecorder;
+let audioChunks = [];
+let isRecording = false;
+let recognition;
+let transcriptContent = '';
+let transcriptModal;
+let backendUrl = "http://127.0.0.1:5001/transcript"; // Same as in popup.js
+
 // Track if the extension has been initialized
 let isExtensionInitialized = false;
 
@@ -175,6 +184,12 @@ function createExplainButton() {
       icon: '📝',
       tooltip: 'Summarize Selection',
       action: activateSummarizeMode
+    },
+    {
+      id: 'dei-talk-option',
+      icon: '🎙️',
+      tooltip: 'Voice Assistant',
+      action: activateTalkMode
     }
   ];
   
@@ -345,16 +360,27 @@ function createExplainButton() {
   }
   
   function activateSummarizeMode() {
-    toggleMenu(); // Close the menu
+    debugLog("Summarize mode activated");
+    if (window.getSelection().toString().trim()) {
+      summarizeSelectedText(window.getSelection().toString());
+    } else {
+      showToast("Please select some text to summarize first", 2000);
+    }
+  }
+  
+  function activateTalkMode() {
+    debugLog("Talk mode activated");
     
-    // Show a fancy scanning animation
-    showPageScanAnimation(() => {
-      // Extract page content
-      const pageContent = extractPageContent();
-      
-      // After animation completes, summarize the page content
-      summarizePageContent(pageContent);
-    });
+    // Close the menu
+    toggleMenu();
+    
+    // Create transcript modal if it doesn't exist
+    if (!transcriptModal) {
+      createTranscriptModal();
+    }
+    
+    // Toggle the transcript modal
+    toggleTranscriptModal();
   }
   
   function showPageScanAnimation(callback) {
@@ -1788,4 +1814,559 @@ function summarizePageContent(content) {
     
     showToast('Failed to get summary');
   });
+}
+
+// Function to create a small draggable transcript modal
+function createTranscriptModal() {
+  debugLog("Creating transcript modal");
+  
+  // Create modal container
+  transcriptModal = document.createElement('div');
+  transcriptModal.id = 'dei-transcript-modal';
+  transcriptModal.style.cssText = `
+    position: fixed;
+    background-color: ${DEI_THEME.dark.card};
+    border-radius: ${DEI_THEME.dark.radius};
+    border: 1px solid ${DEI_THEME.dark.border};
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    padding: 12px;
+    z-index: 9997;
+    width: 300px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    font-family: ${DEI_THEME.dark.fontPrimary};
+    color: ${DEI_THEME.dark.foreground};
+    transition: all 0.2s ease;
+  `;
+  
+  // Create header with title and close button
+  const modalHeader = document.createElement('div');
+  modalHeader.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    cursor: move;
+  `;
+  
+  const modalTitle = document.createElement('div');
+  modalTitle.textContent = 'Voice Assistant';
+  modalTitle.style.cssText = `
+    font-weight: bold;
+    font-size: 14px;
+  `;
+  
+  const closeButton = document.createElement('div');
+  closeButton.innerHTML = '&times;';
+  closeButton.style.cssText = `
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 14px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  `;
+  closeButton.addEventListener('mouseenter', () => {
+    closeButton.style.opacity = '1';
+  });
+  closeButton.addEventListener('mouseleave', () => {
+    closeButton.style.opacity = '0.7';
+  });
+  closeButton.addEventListener('click', () => {
+    stopRecording();
+    transcriptModal.style.display = 'none';
+  });
+  
+  modalHeader.appendChild(modalTitle);
+  modalHeader.appendChild(closeButton);
+  
+  // Create chat container for messages
+  const chatContainer = document.createElement('div');
+  chatContainer.id = 'dei-chat-container';
+  chatContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 200px;
+    overflow-y: auto;
+    padding: 8px;
+    background-color: ${DEI_THEME.dark.background};
+    border-radius: ${DEI_THEME.dark.radius};
+    margin-bottom: 8px;
+  `;
+  
+  // Create editable transcript area (will be used inside input section)
+  const transcriptArea = document.createElement('div');
+  transcriptArea.id = 'dei-transcript-content';
+  transcriptArea.contentEditable = true;
+  transcriptArea.style.cssText = `
+    font-size: 14px;
+    min-height: 60px;
+    max-height: 100px;
+    width: 100%;
+    overflow-y: auto;
+    padding: 8px;
+    background-color: ${DEI_THEME.dark.background};
+    border-radius: ${DEI_THEME.dark.radius};
+    outline: none;
+    border: 1px solid ${DEI_THEME.dark.border};
+    white-space: pre-wrap;
+    word-break: break-word;
+  `;
+  transcriptArea.setAttribute('placeholder', 'Type a message or use voice input...');
+  
+  // Add placeholder behavior
+  transcriptArea.dataset.placeholder = 'Type a message or use voice input...';
+  const placeholderStyle = document.createElement('style');
+  placeholderStyle.textContent = `
+    [contenteditable][data-placeholder]:empty:before {
+      content: attr(data-placeholder);
+      color: ${DEI_THEME.dark.muted};
+      cursor: text;
+    }
+  `;
+  document.head.appendChild(placeholderStyle);
+  
+  // Create input container for editing and sending
+  const inputContainer = document.createElement('div');
+  inputContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  `;
+  
+  // Create button container
+  const buttonsContainer = document.createElement('div');
+  buttonsContainer.style.cssText = `
+    display: flex;
+    gap: 8px;
+  `;
+  
+  // Create record button
+  const recordButton = document.createElement('button');
+  recordButton.id = 'dei-record-button';
+  recordButton.innerHTML = '🎙️';
+  recordButton.title = 'Start Recording';
+  recordButton.style.cssText = `
+    background-color: ${DEI_THEME.dark.primary};
+    color: ${DEI_THEME.dark.foreground};
+    border: none;
+    border-radius: ${DEI_THEME.dark.radius};
+    padding: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  
+  // Add recording indicator/wave
+  const recordingWave = document.createElement('div');
+  recordingWave.id = 'dei-recording-wave';
+  recordingWave.style.cssText = `
+    display: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: red;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    animation: pulse 1.5s infinite ease-in-out;
+  `;
+  
+  // Add animation for recording indicator
+  const waveStyle = document.createElement('style');
+  waveStyle.textContent = `
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.7; }
+      50% { transform: scale(1.05); opacity: 0.9; }
+      100% { transform: scale(0.95); opacity: 0.7; }
+    }
+  `;
+  document.head.appendChild(waveStyle);
+  
+  // Create send button
+  const sendButton = document.createElement('button');
+  sendButton.id = 'dei-send-button';
+  sendButton.innerHTML = '↑';
+  sendButton.title = 'Send Message';
+  sendButton.style.cssText = `
+    background-color: ${DEI_THEME.dark.accent};
+    color: ${DEI_THEME.dark.foreground};
+    border: none;
+    border-radius: ${DEI_THEME.dark.radius};
+    padding: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  
+  // Add click event to record button
+  recordButton.addEventListener('click', () => {
+    if (!isRecording) {
+      startRecording();
+      recordButton.innerHTML = '■';
+      recordButton.title = 'Stop Recording';
+      recordButton.style.backgroundColor = '#dc3545'; // Red for recording
+      recordingWave.style.display = 'block';
+    } else {
+      stopRecording();
+      recordButton.innerHTML = '🎙️';
+      recordButton.title = 'Start Recording';
+      recordButton.style.backgroundColor = DEI_THEME.dark.primary;
+      recordingWave.style.display = 'none';
+    }
+  });
+  
+  // Add click event to send button
+  sendButton.addEventListener('click', () => {
+    const text = transcriptArea.innerText.trim();
+    if (text) {
+      sendTranscript(text);
+      transcriptArea.innerText = '';
+      
+      // Add user message to chat
+      addMessageToChat('user', text);
+    }
+  });
+  
+  // Allow Enter key to send message (Shift+Enter for new line)
+  transcriptArea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendButton.click();
+    }
+  });
+  
+  // Add transcript area and buttons to input container
+  inputContainer.appendChild(transcriptArea);
+  
+  // Add recording wave inside record button container
+  const recordButtonContainer = document.createElement('div');
+  recordButtonContainer.style.cssText = `
+    position: relative;
+  `;
+  recordButtonContainer.appendChild(recordButton);
+  recordButtonContainer.appendChild(recordingWave);
+  
+  // Add buttons to button container
+  buttonsContainer.appendChild(recordButtonContainer);
+  buttonsContainer.appendChild(sendButton);
+  
+  // Add button container to input container
+  inputContainer.appendChild(buttonsContainer);
+  
+  // Build the modal
+  transcriptModal.appendChild(modalHeader);
+  transcriptModal.appendChild(chatContainer);
+  transcriptModal.appendChild(inputContainer);
+  
+  document.body.appendChild(transcriptModal);
+  
+  // Make transcript modal draggable
+  let isDraggingModal = false;
+  let modalOffsetX, modalOffsetY;
+  
+  modalHeader.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // Only left mouse button
+    isDraggingModal = true;
+    
+    const rect = transcriptModal.getBoundingClientRect();
+    modalOffsetX = e.clientX - rect.left;
+    modalOffsetY = e.clientY - rect.top;
+    
+    // Set the container to be movable
+    modalHeader.style.cursor = 'grabbing';
+    
+    // Prevent default to avoid text selection during drag
+    e.preventDefault();
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDraggingModal) return;
+    
+    // Update position
+    const x = e.clientX - modalOffsetX;
+    const y = e.clientY - modalOffsetY;
+    
+    // Keep within viewport bounds
+    const maxX = window.innerWidth - transcriptModal.offsetWidth;
+    const maxY = window.innerHeight - transcriptModal.offsetHeight;
+    
+    transcriptModal.style.left = `${Math.min(Math.max(0, x), maxX)}px`;
+    transcriptModal.style.top = `${Math.min(Math.max(0, y), maxY)}px`;
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (isDraggingModal) {
+      isDraggingModal = false;
+      modalHeader.style.cursor = 'move';
+    }
+  });
+  
+  debugLog("Transcript modal created");
+}
+
+// Function to add message to chat
+function addMessageToChat(sender, text) {
+  const chatContainer = document.getElementById('dei-chat-container');
+  if (!chatContainer) return;
+  
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `dei-chat-message dei-${sender}-message`;
+  messageDiv.style.cssText = `
+    padding: 8px 12px;
+    border-radius: ${DEI_THEME.dark.radius};
+    max-width: 80%;
+    word-wrap: break-word;
+    margin-bottom: 4px;
+    align-self: ${sender === 'user' ? 'flex-end' : 'flex-start'};
+    background-color: ${sender === 'user' ? DEI_THEME.dark.primary : DEI_THEME.dark.secondary};
+  `;
+  
+  messageDiv.innerText = text;
+  chatContainer.appendChild(messageDiv);
+  
+  // Scroll to bottom
+  chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// Function to toggle transcript modal
+function toggleTranscriptModal() {
+  debugLog("Toggling transcript modal");
+  
+  if (transcriptModal) {
+    // If modal is not visible, position it near the Talk button
+    if (transcriptModal.style.display !== 'flex') {
+      const talkButton = document.getElementById('dei-talk-option');
+      if (talkButton) {
+        const rect = talkButton.getBoundingClientRect();
+        transcriptModal.style.left = `${rect.left - 150}px`; // Center aligned with button
+        transcriptModal.style.top = `${rect.top - 280}px`; // Position above the button
+      } else {
+        // Default position if button not found
+        transcriptModal.style.left = '50%';
+        transcriptModal.style.top = '50%';
+        transcriptModal.style.transform = 'translate(-50%, -50%)';
+      }
+      
+      // Show the modal
+      transcriptModal.style.display = 'flex';
+      
+      // Focus the input area
+      const transcriptArea = document.getElementById('dei-transcript-content');
+      if (transcriptArea) {
+        transcriptArea.focus();
+      }
+    } else {
+      // Hide the modal and stop recording if active
+      if (isRecording) {
+        stopRecording();
+        const recordButton = document.getElementById('dei-record-button');
+        if (recordButton) {
+          recordButton.innerHTML = '🎙️';
+          recordButton.title = 'Start Recording';
+          recordButton.style.backgroundColor = DEI_THEME.dark.primary;
+        }
+        const recordingWave = document.getElementById('dei-recording-wave');
+        if (recordingWave) {
+          recordingWave.style.display = 'none';
+        }
+      }
+      transcriptModal.style.display = 'none';
+    }
+  }
+}
+
+// Start recording audio
+async function startRecording() {
+  try {
+    debugLog("Starting recording");
+    
+    // Get the audio stream
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    
+    mediaRecorder.ondataavailable = (event) => {
+      audioChunks.push(event.data);
+    };
+    
+    mediaRecorder.onstop = async () => {
+      // Create audio blob for sending
+      const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+      
+      // Get the transcript from the editable area
+      const transcriptArea = document.getElementById('dei-transcript-content');
+      
+      // If we have transcript content from recognition, use it
+      if (transcriptContent.trim() && transcriptArea) {
+        // Set the recognized text to the editable area
+        transcriptArea.innerText = transcriptContent;
+        
+        // Don't automatically send - let user edit and send manually
+        // Focus the transcript area for editing
+        transcriptArea.focus();
+      } else if (transcriptArea) {
+        // No transcript from recognition
+        transcriptArea.innerText = "Could not transcribe audio. Please type your message.";
+        transcriptArea.focus();
+        transcriptArea.select(); // Select all text for easy replacement
+      }
+    };
+    
+    // Start recording audio
+    mediaRecorder.start();
+    isRecording = true;
+    
+    // Reset transcript content
+    transcriptContent = '';
+    
+    // Start live transcription concurrently
+    if (!("webkitSpeechRecognition" in window)) {
+      const transcriptArea = document.getElementById('dei-transcript-content');
+      if (transcriptArea) {
+        transcriptArea.innerText = "Speech recognition not supported in this browser.";
+      }
+      return;
+    }
+    
+    recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    
+    let finalTranscript = "";
+    recognition.onresult = (event) => {
+      let interimTranscript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      
+      // Update transcript content
+      transcriptContent = finalTranscript;
+      
+      // Update display in editable area
+      const transcriptArea = document.getElementById('dei-transcript-content');
+      if (transcriptArea) {
+        transcriptArea.innerText = `${finalTranscript} ${interimTranscript}`;
+      }
+    };
+    
+    recognition.onend = () => {
+      if (isRecording) {
+        // If recording is still active but recognition ended, restart it
+        recognition.start();
+      }
+    };
+    
+    recognition.start();
+    
+    debugLog("Recording started");
+  } catch (error) {
+    console.error("Error accessing microphone:", error);
+    
+    const transcriptArea = document.getElementById('dei-transcript-content');
+    if (transcriptArea) {
+      transcriptArea.innerText = "Microphone access denied. Please allow access in browser settings.";
+    }
+    
+    isRecording = false;
+    const recordButton = document.getElementById('dei-record-button');
+    if (recordButton) {
+      recordButton.innerHTML = '🎙️';
+      recordButton.title = 'Start Recording';
+      recordButton.style.backgroundColor = DEI_THEME.dark.primary;
+    }
+    const recordingWave = document.getElementById('dei-recording-wave');
+    if (recordingWave) {
+      recordingWave.style.display = 'none';
+    }
+  }
+}
+
+// Stop recording
+function stopRecording() {
+  debugLog("Stopping recording");
+  
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    
+    // Stop all tracks in the stream
+    if (mediaRecorder.stream) {
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    isRecording = false;
+    
+    if (recognition) {
+      recognition.stop();
+    }
+    
+    debugLog("Recording stopped");
+  }
+}
+
+// Send transcript to backend
+async function sendTranscript(transcript) {
+  try {
+    debugLog("Sending transcript to backend");
+    
+    // Add loading indicator to chat
+    addMessageToChat('assistant', 'Processing your request...');
+    
+    const response = await fetch(backendUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript }),
+    });
+    
+    const data = await response.json();
+    console.log("Backend response:", data);
+    
+    // Get the chat container to remove the last message (loading indicator)
+    const chatContainer = document.getElementById('dei-chat-container');
+    if (chatContainer && chatContainer.lastChild) {
+      chatContainer.removeChild(chatContainer.lastChild);
+    }
+    
+    // Add response to chat
+    if (data.response) {
+      addMessageToChat('assistant', data.response);
+    } else if (data.selected_tool) {
+      addMessageToChat('assistant', `Tool selected: ${data.selected_tool}`);
+    } else if (data.summary) {
+      addMessageToChat('assistant', data.summary);
+    } else {
+      addMessageToChat('assistant', "Received your message.");
+    }
+    
+    debugLog("Transcript processed");
+  } catch (error) {
+    console.error("Error sending transcript:", error);
+    
+    // Get the chat container to remove the last message (loading indicator)
+    const chatContainer = document.getElementById('dei-chat-container');
+    if (chatContainer && chatContainer.lastChild) {
+      chatContainer.removeChild(chatContainer.lastChild);
+    }
+    
+    // Add error message to chat
+    addMessageToChat('assistant', "Error processing your request. Please try again.");
+  }
 }
