@@ -1,15 +1,58 @@
 // Global variables
 let socketConnected = false;
 let socket = null;
+const DEBUG = true;  // Enable debugging
+
+// Debug logging function
+function debugLog(...args) {
+  if (DEBUG) {
+    console.log("[DEI Extension Background]", ...args);
+  }
+}
 
 // Background script initialization
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("DEI Voice Assistant Extension Installed");
+  debugLog("DEI Voice Assistant Extension Installed");
 });
 
 // Message handler for communication with the popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("Background script received message:", request, "from:", sender);
+  debugLog("Background script received message:", request.action || "unknown action", "from:", sender.tab ? "content script" : "popup");
+  
+  // Handle screenshot capture request
+  if (request.action === "captureScreenshot" && request.selection) {
+    debugLog("Screenshot capture requested with selection:", request.selection);
+    
+    try {
+      // Capture the current tab
+      chrome.tabs.captureVisibleTab(null, { format: 'png' }, function(dataUrl) {
+        if (chrome.runtime.lastError) {
+          const errorMsg = chrome.runtime.lastError.message;
+          debugLog("Error capturing screenshot:", errorMsg);
+          sendResponse({ error: errorMsg });
+          return;
+        }
+        
+        if (!dataUrl) {
+          debugLog("No data URL returned from captureVisibleTab");
+          sendResponse({ error: "No screenshot data received" });
+          return;
+        }
+        
+        debugLog("Screenshot captured successfully, sending to content script for processing");
+        
+        // Service workers can't use the Image constructor, so we'll send the full image back
+        // and let the content script do the cropping
+        sendResponse({ fullScreenshot: dataUrl });
+      });
+    } catch (error) {
+      debugLog("Exception in captureScreenshot handler:", error);
+      sendResponse({ error: "Exception: " + error.message });
+    }
+    
+    // Return true to indicate we'll respond asynchronously
+    return true;
+  }
   
   // Handle text-to-speech request from the page
   if (request.action === "readAloud" && request.data?.text) {
@@ -111,5 +154,5 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Handle extension icon click
 chrome.action.onClicked.addListener((tab) => {
-  console.log("Extension icon clicked", tab);
+  debugLog("Extension icon clicked", tab.id);
 });

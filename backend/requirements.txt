@@ -2,6 +2,9 @@
 Flask==2.3.3
 Flask-Cors==4.0.0
 Werkzeug==2.3.7
+Flask-SocketIO==5.3.6
+eventlet==0.33.3
+websocket-client==1.7.0
 
 # Anthropic
 anthropic
@@ -12,5 +15,7 @@ langchain>=0.3
 langchain-community>=0.3
 langchain-text-splitters>=0.3
 langchain-core>=0.3
-langchain-anthropic==0.2.0
+langchain-anthropic>=0.3.0
 python-dotenv==1.0.0
+eventlet==0.33.3
+websocket-client==1.7.0

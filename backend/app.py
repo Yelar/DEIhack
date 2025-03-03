@@ -24,13 +24,15 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, 
                    cors_allowed_origins="*", 
                    logger=True, 
-                   engineio_logger=True)
+                   engineio_logger=True,
+                   async_mode='threading')
 
 # Debug flag to show all events
 DEBUG = True
 
 # Initialize OpenAI client
-openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
+# openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Cache for storing generated audio to avoid redundant API calls
 tts_cache = {}
@@ -43,6 +45,10 @@ AVAILABLE_TOOLS = [
     {
         "name": "summarize",
         "description": "Summarize the given text content"
+    },
+    {
+        "name": "fill the form",
+        "description": "fill the form with the basic user information"
     },
     {
         "name": "find",
@@ -169,7 +175,18 @@ def execute_tool(tool_name, transcript_text):
             "status": "initiated", 
             "message": "Summarize tool called. Frontend will extract page content and request summarization."
         }
+    elif tool_name == "fill the form":
+        log_debug(f"Emitting 'tool_called' socket event for fill the form tool")
+        socketio.emit('tool_called', {'tool': 'fill the form', 'message': 'Fill the form tool called'})
+        print("Fill tool called AYOOOO")
         
+        # Just return a confirmation that the socket event was emitted
+        # The actual summarization will happen on the frontend
+        result = {
+            "status": "initiated", 
+            "message": "Fill the form tool called. Frontend will extract page content and request filling the form."
+        }
+    
     elif tool_name == "find":
         # Handle finding specific information
         response = client.messages.create(
@@ -655,7 +672,9 @@ def text_to_speech():
             }), 200
         
         try:
-            response = openai_client.audio.speech.create(
+            # For OpenAI v1.0.0+
+            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = client.audio.speech.create(
                 model="tts-1",
                 voice=voice,
                 input=text
@@ -707,6 +726,152 @@ def text_to_speech():
         log_debug(f"Error in text_to_speech: {str(e)}")
         tts_active = False
         return jsonify({"error": str(e)}), 500
+
+@app.route('/explain', methods=['POST'])
+def explain():
+    """
+    Endpoint to explain selected text or image content using Claude
+    This endpoint accepts either text content or a base64-encoded image
+    and returns a simplified explanation.
+    """
+    try:
+        if DEBUG:
+            app.logger.info(f"Received request to /explain endpoint")
+        
+        # Check if we have a valid JSON body
+        if not request.is_json:
+            app.logger.error("Request to /explain did not contain JSON data")
+            return jsonify({
+                'status': 'error',
+                'message': 'Request must contain JSON data'
+            }), 400
+            
+        data = request.json
+        
+        if DEBUG:
+            text_present = 'text' in data
+            image_present = 'image_data' in data
+            app.logger.info(f"/explain request contains text: {text_present}, image: {image_present}")
+        
+        # Check if we have either text or image data
+        if not (data.get('text') or data.get('image_data')):
+            app.logger.error("Request to /explain missing both text and image_data")
+            return jsonify({
+                'status': 'error',
+                'message': 'Either text or image data is required'
+            }), 400
+            
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        messages = []
+        
+        # Handle text explanation
+        if data.get('text'):
+            if DEBUG:
+                app.logger.info(f"Processing text explanation request of length {len(data['text'])}")
+                
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Please explain the following text in simple, straightforward language. Use short sentences, avoid jargon, and focus on making the content accessible to everyone including neurodivergent individuals and non-native speakers. Keep the explanation very brief and to the point (2-3 short paragraphs maximum):\n\n{data['text']}"
+                        }
+                    ]
+                }
+            ]
+        
+        # Handle image explanation
+        elif data.get('image_data'):
+            # The image data is expected to be base64 encoded
+            image_data = data['image_data']
+            
+            if DEBUG:
+                app.logger.info(f"Processing image explanation request, data length: {len(image_data)}")
+            
+            # Determine image format from data URL
+            media_type = "image/png"  # Default
+            
+            # Remove the data URL prefix if present (e.g., "data:image/png;base64,")
+            if ',' in image_data:
+                prefix = image_data.split(',', 1)[0]
+                image_data = image_data.split(',', 1)[1]
+                
+                # Extract media type from prefix if possible
+                if 'image/jpeg' in prefix:
+                    media_type = 'image/jpeg'
+                elif 'image/jpg' in prefix:
+                    media_type = 'image/jpeg'
+                elif 'image/png' in prefix:
+                    media_type = 'image/png'
+                elif 'image/webp' in prefix:
+                    media_type = 'image/webp'
+                    
+                if DEBUG:
+                    app.logger.info(f"Detected image media type: {media_type}")
+            
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Please explain what you see in this image in simple, straightforward language. Use short sentences, avoid jargon, and focus on making the description accessible to everyone including neurodivergent individuals and non-native speakers. Keep the explanation very brief (2-3 short paragraphs maximum)."
+                            },
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image_data
+                                }
+                            }
+                        ]
+                    }
+                ]
+            except Exception as e:
+                app.logger.error(f"Error preparing image message: {str(e)}")
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Error processing image data: {str(e)}'
+                }), 400
+        
+        if DEBUG:
+            app.logger.info("Sending request to Claude API")
+            
+        # Get response from Claude
+        try:
+            response = client.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=1000,
+                messages=messages
+            )
+            
+            explanation = response.content[0].text
+            
+            if DEBUG:
+                app.logger.info(f"Received explanation from Claude, length: {len(explanation)}")
+                
+            return jsonify({
+                'status': 'success',
+                'explanation': explanation
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error from Claude API: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Claude API error: {str(e)}'
+            }), 500
+        
+    except Exception as e:
+        app.logger.error(f"Error in explain endpoint: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     print("Starting DEI Voice Assistant backend server...")

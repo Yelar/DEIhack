@@ -79,6 +79,12 @@ document.addEventListener("DOMContentLoaded", () => {
           console.error("Summarization error:", error);
           updateStatus("Error: " + error.message);
         });
+    } else if (data.tool === "fill the form") {
+      updateStatus("Filling the form...");
+      fillForm()
+        .then(response => {
+          updateStatus("Form filled successfully");
+        })
     }
   });
   

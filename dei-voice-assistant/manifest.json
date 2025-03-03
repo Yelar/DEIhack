@@ -2,13 +2,16 @@
   "manifest_version": 3,
   "name": "DEI Hackathon",
   "version": "1.0",
-  "description": "Help DEI people to get the best out of their voice",
+  "description": "Help DEI people to get the best out of their voice and explain content",
   "permissions": [
     "scripting", 
     "activeTab", 
     "storage", 
     "tabs",
-    "notifications"
+    "notifications",
+    "contextMenus",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "http://127.0.0.1:5001/*",
