@@ -1,4 +1,7 @@
 // Debug log to confirm content script is loaded
+console.log('DEI Voice Assistant content script loaded');
+// Updated: Moved Read Aloud button to modal footer for better UX
+
 const DEBUG = true;  // Enable debugging
 
 // Track if the extension has been initialized
